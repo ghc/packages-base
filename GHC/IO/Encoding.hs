@@ -21,19 +21,20 @@ module GHC.IO.Encoding (
   utf8, utf8_bom,
   utf16, utf16le, utf16be,
   utf32, utf32le, utf32be, 
-  localeEncoding, localeEncoding_ignore,
+  localeEncoding, fileSystemEncoding,
   mkTextEncoding,
   ) where
 
 import GHC.Base
 --import GHC.IO
+import GHC.IO.Exception
 import GHC.IO.Buffer
+import GHC.IO.Encoding.Failure
 import GHC.IO.Encoding.Types
 import GHC.Word
 #if !defined(mingw32_HOST_OS)
 import qualified GHC.IO.Encoding.Iconv  as Iconv
 #else
-import GHC.IO.Encoding.Failure
 import qualified GHC.IO.Encoding.CodePage as CodePage
 import Text.Read (reads)
 #endif
@@ -42,10 +43,8 @@ import qualified GHC.IO.Encoding.UTF8   as UTF8
 import qualified GHC.IO.Encoding.UTF16  as UTF16
 import qualified GHC.IO.Encoding.UTF32  as UTF32
 
-#if defined(mingw32_HOST_OS)
+import Data.List
 import Data.Maybe
-import GHC.IO.Exception
-#endif
 
 -- -----------------------------------------------------------------------------
 
@@ -100,15 +99,16 @@ utf32be = UTF32.utf32be
 -- | The Unicode encoding of the current locale
 localeEncoding :: TextEncoding
 
--- | The Unicode encoding of the current locale, ignoring coding errors
-localeEncoding_ignore :: TextEncoding
+-- | The Unicode encoding of the current locale, but allowing arbitrary
+-- undecodable bytes to be round-tripped through it
+fileSystemEncoding :: TextEncoding
 
 #if !defined(mingw32_HOST_OS)
 localeEncoding = Iconv.localeEncoding
-localeEncoding_ignore = Iconv.localeEncoding_ignore
+fileSystemEncoding = Iconv.localeEncodingFailingWith SurrogateEscapeFailure
 #else
 localeEncoding = CodePage.localeEncoding
-localeEncoding_ignore = CodePage.localeEncoding_ignore
+fileSystemEncoding = CodePage.localeEncodingFailingWith SurrogateEscapeFailure
 #endif
 
 -- | Look up the named Unicode encoding.  May fail with 
@@ -138,31 +138,35 @@ localeEncoding_ignore = CodePage.localeEncoding_ignore
 -- @CP@; for example, @\"CP1250\"@.
 --
 mkTextEncoding :: String -> IO TextEncoding
-#if !defined(mingw32_HOST_OS)
-mkTextEncoding = Iconv.mkTextEncoding
+mkTextEncoding e = case mb_coding_failure_mode of
+  Nothing -> unknown_encoding
+  Just cfm -> case enc of
+    "UTF-8"    -> return $ UTF8.utf8FailingWith cfm
+    "UTF-16"   -> return $ UTF16.utf16FailingWith cfm
+    "UTF-16LE" -> return $ UTF16.utf16leFailingWith cfm
+    "UTF-16BE" -> return $ UTF16.utf16beFailingWith cfm
+    "UTF-32"   -> return $ UTF32.utf32FailingWith cfm
+    "UTF-32LE" -> return $ UTF32.utf32leFailingWith cfm
+    "UTF-32BE" -> return $ UTF32.utf32beFailingWith cfm
+#if defined(mingw32_HOST_OS)
+    'C':'P':n | [(cp,"")] <- reads n -> return $ CodePage.codePageEncodingFailingWith cp cfm
+    _ -> unknown_encoding
 #else
-mkTextEncoding e = case (mb_coding_failure_mode, e) of
-    (Just cfm, "UTF-8"    -> return $ UTF8.utf8FailingWith cfm
-    (Just cfm, "UTF-16"   -> return $ UTF16.utf16FailingWith cfm
-    (Just cfm, "UTF-16LE" -> return $ UTF16.utf16leFailingWith cfm
-    (Just cfm, "UTF-16BE" -> return $ UTF16.utf16beFailingWith cfm
-    (Just cfm, "UTF-32"   -> return $ UTF32.utf32FailingWith cfm
-    (Just cfm, "UTF-32LE" -> return $ UTF32.utf32leFailingWith cfm
-    (Just cfm, "UTF-32BE" -> return $ UTF32.utf32beFailingWith cfm
-    (Just cfm, 'C':'P':n)
-        | [(cp,"")] <- reads n = return $ CodePage.codePageEncodingFailingWith cp cfm
-    _ -> ioException (IOError Nothing NoSuchThing "mkTextEncoding"
-                              ("unknown encoding:" ++ e)  Nothing Nothing)
+    _ -> Iconv.mkTextEncoding e
+#endif
   where
-    -- The only problem with actually documenting //IGNORE as a supported suffix
-    -- is that it's not necessarily supported with non-GNU iconv
+    -- The only problem with actually documenting //IGNORE and //TRANSLIT as
+    -- supported suffixes is that they are not necessarily supported with non-GNU iconv
     (enc, suffix) = span (/= '/') e
     mb_coding_failure_mode = case suffix of
-        ""           -> Just ErrorOnCodingFailure
-        "//IGNORE"   -> Just IgnoreCodingFailure
-        "//TRANSLIT" -> Just TransliterateCodingFailure
-        _            -> Nothing
-#endif
+        ""            -> Just ErrorOnCodingFailure
+        "//IGNORE"    -> Just IgnoreCodingFailure
+        "//TRANSLIT"  -> Just TransliterateCodingFailure
+        "//SURROGATE" -> Just SurrogateEscapeFailure
+        _             -> Nothing
+    
+    unknown_encoding = ioException (IOError Nothing NoSuchThing "mkTextEncoding"
+                                            ("unknown encoding:" ++ e)  Nothing Nothing)
 
 latin1_encode :: CharBuffer -> Buffer Word8 -> IO (CharBuffer, Buffer Word8)
 latin1_encode = Latin1.latin1_encode -- unchecked, used for binary

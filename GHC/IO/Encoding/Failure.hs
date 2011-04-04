@@ -39,7 +39,7 @@ codingFailureModeSuffix :: CodingFailureMode -> String
 codingFailureModeSuffix ErrorOnCodingFailure       = ""
 codingFailureModeSuffix IgnoreCodingFailure        = "//IGNORE"
 codingFailureModeSuffix TransliterateCodingFailure = "//TRANSLIT"
-codingFailureModeSuffix SurrogateEscapeFailure     = "//SURROGATE" -- FIXME: parse
+codingFailureModeSuffix SurrogateEscapeFailure     = "//SURROGATE"
 
 -- | In transliterate mode, we use this character when decoding unknown bytes.
 --

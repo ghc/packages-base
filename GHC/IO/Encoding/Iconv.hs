@@ -27,7 +27,7 @@ module GHC.IO.Encoding.Iconv (
    utf8, 
    utf16, utf16le, utf16be,
    utf32, utf32le, utf32be,
-   localeEncoding, localeEncoding_ignore
+   localeEncoding, localeEncodingFailingWith
 #endif
  ) where
 
@@ -111,9 +111,9 @@ localeEncodingName = unsafePerformIO $ do
 localeEncoding :: TextEncoding
 localeEncoding = unsafePerformIO $ mkTextEncoding localeEncodingName
 
-{-# NOINLINE localeEncoding_ignore #-}
-localeEncoding_ignore :: TextEncoding
-localeEncoding_ignore = unsafePerformIO $ mkTextEncodingFailingWith IgnoreCodingFailure localeEncodingName
+{-# NOINLINE localeEncodingFailingWith #-}
+localeEncodingFailingWith :: CodingFailureMode -> TextEncoding
+localeEncodingFailingWith cfm = unsafePerformIO $ mkTextEncodingFailingWith cfm localeEncodingName
 
 -- We hope iconv_t is a storable type.  It should be, since it has at least the
 -- value -1, which is a possible return value from iconv_open.
