@@ -116,7 +116,7 @@ module Control.Exception.Base (
 
 #ifdef __GLASGOW_HASKELL__
 import GHC.Base
-import GHC.IO hiding (finally,onException)
+import GHC.IO hiding (bracket,finally,onException)
 import GHC.IO.Exception
 import GHC.Exception
 import GHC.Show

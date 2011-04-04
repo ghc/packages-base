@@ -21,7 +21,7 @@ module GHC.IO.Encoding (
   utf8, utf8_bom,
   utf16, utf16le, utf16be,
   utf32, utf32le, utf32be, 
-  localeEncoding, fileSystemEncoding,
+  localeEncoding, fileSystemEncoding, foreignEncoding,
   mkTextEncoding,
   ) where
 
@@ -103,12 +103,19 @@ localeEncoding :: TextEncoding
 -- undecodable bytes to be round-tripped through it
 fileSystemEncoding :: TextEncoding
 
+-- | The Unicode encoding of the current locale, but where undecodable
+-- bytes are replaced with their closest visual match. Used for
+-- the 'CString' marshalling functions in "Foreign.C.String"
+foreignEncoding :: TextEncoding
+
 #if !defined(mingw32_HOST_OS)
 localeEncoding = Iconv.localeEncoding
 fileSystemEncoding = Iconv.localeEncodingFailingWith SurrogateEscapeFailure
+foreignEncoding = Iconv.localeEncodingFailingWith IgnoreCodingFailure
 #else
 localeEncoding = CodePage.localeEncoding
-fileSystemEncoding = CodePage.localeEncodingFailingWith SurrogateEscapeFailure
+fileSystemEncoding = CodePage.localeEncoding -- On Windows, this is rarely used. FilePaths will always be Unicode
+foreignEncoding = CodePage.localeEncodingFailingWith IgnoreCodingFailure
 #endif
 
 -- | Look up the named Unicode encoding.  May fail with 
