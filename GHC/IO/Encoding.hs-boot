@@ -3,4 +3,4 @@ module GHC.IO.Encoding where
 
 import GHC.IO.Encoding.Types
 
-localeEncoding, foreignEncoding :: TextEncoding
+localeEncoding, fileSystemEncoding, foreignEncoding :: TextEncoding

@@ -38,6 +38,8 @@ import Control.Exception.Base   ( bracket )
 import Control.Monad
 -- import GHC.IO
 import GHC.IO.Exception
+import GHC.IO.Encoding (fileSystemEncoding)
+import qualified GHC.Foreign as GHC
 #endif
 
 #ifdef __HUGS__
@@ -66,7 +68,8 @@ getArgs =
    getProgArgv p_argc p_argv
    p    <- fromIntegral `liftM` peek p_argc
    argv <- peek p_argv
-   peekArray (p - 1) (advancePtr argv 1) >>= mapM peekCString
+   -- FIXME: we should use GetCommandLineW on Windows instead
+   peekArray (p - 1) (advancePtr argv 1) >>= mapM (GHC.peekCString fileSystemEncoding)
 
 
 foreign import ccall unsafe "getProgArgv"
@@ -92,7 +95,8 @@ getProgName =
 
 unpackProgName  :: Ptr (Ptr CChar) -> IO String   -- argv[0]
 unpackProgName argv = do
-  s <- peekElemOff argv 0 >>= peekCString
+  -- FIXME: we should use GetCommandLineW on Windows instead
+  s <- peekElemOff argv 0 >>= GHC.peekCString fileSystemEncoding
   return (basename s)
   where
    basename :: String -> String
@@ -121,10 +125,11 @@ unpackProgName argv = do
 
 getEnv :: String -> IO String
 getEnv name =
+    -- FIXME: should use GetEnvironmentVariableW on Windows instead
     withCString name $ \s -> do
       litstring <- c_getenv s
       if litstring /= nullPtr
-        then peekCString litstring
+        then GHC.peekCString fileSystemEncoding litstring
         else ioException (IOError Nothing NoSuchThing "getEnv"
                           "no environment variable" Nothing (Just name))
 
@@ -169,7 +174,8 @@ freeArgv argv = do
 
 setArgs :: [String] -> IO (Ptr CString)
 setArgs argv = do
-  vs <- mapM newCString argv >>= newArray0 nullPtr
+  -- FIXME: should iterate SetEnvironmentVariable on Windows instead
+  vs <- mapM (GHC.newCString fileSystemEncoding) argv >>= newArray0 nullPtr
   setArgsPrim (genericLength argv) vs
   return vs
 
@@ -184,10 +190,11 @@ foreign import ccall unsafe "setProgArgv"
 
 getEnvironment :: IO [(String, String)]
 getEnvironment = do
+   -- FIXME: we should use GetEnvironmentStringsW on Windows instead
    pBlock <- getEnvBlock
    if pBlock == nullPtr then return []
     else do
-      stuff <- peekArray0 nullPtr pBlock >>= mapM peekCString
+      stuff <- peekArray0 nullPtr pBlock >>= mapM (GHC.peekCString fileSystemEncoding)
       return (map divvy stuff)
   where
    divvy str =

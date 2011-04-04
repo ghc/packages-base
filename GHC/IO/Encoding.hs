@@ -100,7 +100,10 @@ utf32be = UTF32.utf32be
 localeEncoding :: TextEncoding
 
 -- | The Unicode encoding of the current locale, but allowing arbitrary
--- undecodable bytes to be round-tripped through it
+-- undecodable bytes to be round-tripped through it.
+--
+-- This 'TextEncoding' is also used to decode command line arguments
+-- and environment variables.
 fileSystemEncoding :: TextEncoding
 
 -- | The Unicode encoding of the current locale, but where undecodable
@@ -114,7 +117,7 @@ fileSystemEncoding = Iconv.localeEncodingFailingWith SurrogateEscapeFailure
 foreignEncoding = Iconv.localeEncodingFailingWith IgnoreCodingFailure
 #else
 localeEncoding = CodePage.localeEncoding
-fileSystemEncoding = CodePage.localeEncoding -- On Windows, this is rarely used. FilePaths will always be Unicode
+fileSystemEncoding = CodePage.localeEncoding -- On Windows, this *should not* be used. Strings should be retrieved via *W APIs instead
 foreignEncoding = CodePage.localeEncodingFailingWith IgnoreCodingFailure
 #endif
 

@@ -52,6 +52,10 @@ import GHC.IO
 import GHC.IO.IOMode
 import GHC.IO.Exception
 import GHC.IO.Device
+#ifndef mingw32_HOST_OS
+import {-# SOURCE #-} GHC.IO.Encoding (fileSystemEncoding)
+import qualified GHC.Foreign as GHC
+#endif
 #elif __HUGS__
 import Hugs.Prelude (IOException(..), IOErrorType(..))
 import Hugs.IO (IOMode(..))
@@ -172,10 +176,14 @@ fdGetMode fd = do
 
 #ifdef mingw32_HOST_OS
 withFilePath :: FilePath -> (CWString -> IO a) -> IO a
-withFilePath = withCWString 
+withFilePath = withCWString
 #else
 withFilePath :: FilePath -> (CString -> IO a) -> IO a
+#if __GLASGOW_HASKELL__
+withFilePath = GHC.withCString fileSystemEncoding
+#else
 withFilePath = withCString
+#endif
 #endif
 
 -- ---------------------------------------------------------------------------
