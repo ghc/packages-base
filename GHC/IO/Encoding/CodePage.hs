@@ -14,6 +14,7 @@ import GHC.Num
 import GHC.Enum
 import GHC.Word
 import GHC.IO (unsafePerformIO)
+import GHC.IO.Encoding.Failure
 import GHC.IO.Encoding.Types
 import GHC.IO.Buffer
 import GHC.IO.Exception
@@ -92,17 +93,20 @@ decodeFromSingleByte cfm convArr
             | otherwise = do
                 b <- readWord8Buf iraw ir
                 let c = lookupConv convArr b
-                if c=='\0' && b /= 0 then invalid (ir+1) else do
+                if c=='\0' && b /= 0 then invalid b (ir+1) else do
                 ow' <- writeCharBuf oraw ow c
                 loop (ir+1) ow'
           where
-            invalid ir' = case cfm of
+            invalid b ir' = case cfm of
                 ErrorOnCodingFailure
                   | ir > ir0  -> done ir ow
                   | otherwise -> ioe_decodingError
                 IgnoreCodingFailure -> loop ir' ow
                 TransliterateCodingFailure -> do
                     ow' <- writeCharBuf oraw ow unrepresentableChar
+                    loop ir' ow'
+                SurrogateEscapeFailure -> do
+                    ow' <- writeCharBuf oraw ow (decodeToSurrogateCharacter b)
                     loop ir' ow'
     in loop ir0 ow0
 
@@ -122,19 +126,21 @@ encodeToSingleByte cfm CompactArray { encoderMax = maxChar,
                 (c,ir') <- readCharBuf iraw ir
                 case lookupCompact maxChar indices values c of
                     Nothing -> invalid ir'
-                    Just 0 | c /= '\0' -> invalid ir'
+                    Just 0 | c /= '\0' -> invalid c ir'
                     Just b -> do
                         writeWord8Buf oraw ow b
                         loop ir' (ow+1)
             where
-                invalid ir' = case cfm of
-                    ErrorOnCodingFailure
-                      | ir > ir0  -> done ir ow
-                      | otherwise -> ioe_encodingError
+                invalid c ir' = case cfm of
+                    SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+                        writeWord8Buf oraw ow b
+                        loop ir' (ow+1)
                     IgnoreCodingFailure -> loop ir' ow
                     TransliterateCodingFailure -> do
                         writeWord8Buf oraw ow unrepresentableByte
                         loop ir' (ow+1)
+                    _ | ir > ir0  -> done ir ow
+                      | otherwise -> ioe_encodingError
     in
     loop ir0 ow0
 

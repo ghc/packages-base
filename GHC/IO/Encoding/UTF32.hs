@@ -1,5 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude
            , BangPatterns
+           , PatternGuards
            , NondecreasingIndentation
            , MagicHash
   #-}
@@ -46,6 +47,7 @@ import GHC.Num
 -- import GHC.IO
 import GHC.IO.Exception
 import GHC.IO.Buffer
+import GHC.IO.Encoding.Failure
 import GHC.IO.Encoding.Types
 import GHC.Word
 import Data.Bits
@@ -62,7 +64,7 @@ utf32FailingWith :: CodingFailureMode -> TextEncoding
 utf32FailingWith cfm
   = TextEncoding { textEncodingName = "UTF-32" ++ codingFailureModeSuffix cfm,
                    mkTextDecoder = utf32_DF cfm,
-                   mkTextEncoder = utf32_EF }
+                   mkTextEncoder = utf32_EF cfm }
 
 utf32_DF :: CodingFailureMode -> IO (TextDecoder (Maybe DecodeBuffer))
 utf32_DF cfm = do
@@ -74,22 +76,25 @@ utf32_DF cfm = do
              setState = writeIORef seen_bom
           })
 
-utf32_EF :: IO (TextEncoder Bool)
-utf32_EF = do
+utf32_EF :: CodingFailureMode -> IO (TextEncoder Bool)
+utf32_EF cfm = do
   done_bom <- newIORef False
   return (BufferCodec {
-             encode   = utf32_encode done_bom,
+             encode   = utf32_encodeFailingWith cfm done_bom,
              close    = return (),
              getState = readIORef done_bom,
              setState = writeIORef done_bom
           })
 
 utf32_encode :: IORef Bool -> EncodeBuffer
-utf32_encode done_bom input
+utf32_encode = utf32_encodeFailingWith ErrorOnCodingFailure
+
+utf32_encodeFailingWith :: CodingFailureMode -> IORef Bool -> EncodeBuffer
+utf32_encodeFailingWith cfm done_bom input
   output@Buffer{ bufRaw=oraw, bufL=_, bufR=ow, bufSize=os }
  = do
   b <- readIORef done_bom
-  if b then utf32_native_encode input output
+  if b then utf32_native_encode cfm input output
        else if os - ow < 4
                then return (input,output)
                else do
@@ -98,7 +103,7 @@ utf32_encode done_bom input
                     writeWord8Buf oraw (ow+1) bom1
                     writeWord8Buf oraw (ow+2) bom2
                     writeWord8Buf oraw (ow+3) bom3
-                    utf32_native_encode input output{ bufR = ow+4 }
+                    utf32_native_encode cfm input output{ bufR = ow+4 }
 
 utf32_decode :: IORef (Maybe DecodeBuffer) -> DecodeBuffer
 utf32_decode = utf32_decodeFailingWith ErrorOnCodingFailure
@@ -139,8 +144,8 @@ bom3 = 0xff
 utf32_native_decode :: CodingFailureMode -> DecodeBuffer
 utf32_native_decode = utf32be_decodeFailingWith
 
-utf32_native_encode :: EncodeBuffer
-utf32_native_encode = utf32be_encode
+utf32_native_encode :: CodingFailureMode -> EncodeBuffer
+utf32_native_encode = utf32be_encodeFailingWith
 
 -- -----------------------------------------------------------------------------
 -- UTF32LE and UTF32BE
@@ -152,7 +157,7 @@ utf32beFailingWith :: CodingFailureMode -> TextEncoding
 utf32beFailingWith cfm
   = TextEncoding { textEncodingName = "UTF-32BE" ++ codingFailureModeSuffix cfm,
                    mkTextDecoder = utf32be_DF cfm,
-                   mkTextEncoder = utf32be_EF }
+                   mkTextEncoder = utf32be_EF cfm }
 
 utf32be_DF :: CodingFailureMode -> IO (TextDecoder ())
 utf32be_DF cfm =
@@ -163,10 +168,10 @@ utf32be_DF cfm =
              setState = const $ return ()
           })
 
-utf32be_EF :: IO (TextEncoder ())
-utf32be_EF =
+utf32be_EF :: CodingFailureMode -> IO (TextEncoder ())
+utf32be_EF cfm =
   return (BufferCodec {
-             encode   = utf32be_encode,
+             encode   = utf32be_encodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -180,7 +185,7 @@ utf32leFailingWith :: CodingFailureMode -> TextEncoding
 utf32leFailingWith cfm
   = TextEncoding { textEncodingName = "UTF-32LE" ++ codingFailureModeSuffix cfm,
                    mkTextDecoder = utf32le_DF cfm,
-                   mkTextEncoder = utf32le_EF }
+                   mkTextEncoder = utf32le_EF cfm }
 
 utf32le_DF :: CodingFailureMode -> IO (TextDecoder ())
 utf32le_DF cfm =
@@ -191,10 +196,10 @@ utf32le_DF cfm =
              setState = const $ return ()
           })
 
-utf32le_EF :: IO (TextEncoder ())
-utf32le_EF =
+utf32le_EF :: CodingFailureMode -> IO (TextEncoder ())
+utf32le_EF cfm =
   return (BufferCodec {
-             encode   = utf32le_encode,
+             encode   = utf32le_encodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -217,18 +222,26 @@ utf32be_decodeFailingWith cfm
               c2 <- readWord8Buf iraw (ir+2)
               c3 <- readWord8Buf iraw (ir+3)
               let x1 = chr4 c0 c1 c2 c3
-              if not (validate x1) then invalid (ir+4) else do
+              if not (validate x1) then invalid c0 c1 c2 c3 (ir+4) else do
               ow' <- writeCharBuf oraw ow x1
               loop (ir+4) ow'
          where
-           invalid ir' = case cfm of
-               ErrorOnCodingFailure
-                 | ir > ir0  -> done ir ow
-                 | otherwise -> ioe_decodingError
+           invalid c0 c1 c2 c3 ir' = case cfm of
                IgnoreCodingFailure -> loop ir' ow
                TransliterateCodingFailure -> do
                  ow' <- writeCharBuf oraw ow unrepresentableChar
                  loop ir' ow'
+               SurrogateEscapeFailure | (os-ow) < 4 -> done ir ow
+                                      | otherwise -> do
+                 -- We know that 4 characters is sufficient even with CHARBUF_UTF16
+                 -- because surrogate characters are always of the form 0xDCxx
+                 ow1 <- writeCharBuf oraw ow (decodeToSurrogateCharacter c0)
+                 ow2 <- writeCharBuf oraw ow1 (decodeToSurrogateCharacter c1)
+                 ow3 <- writeCharBuf oraw ow2 (decodeToSurrogateCharacter c2)
+                 ow4 <- writeCharBuf oraw ow3 (decodeToSurrogateCharacter c3)
+                 loop ir' ow4
+               _ | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }
@@ -253,18 +266,26 @@ utf32le_decodeFailingWith cfm
               c2 <- readWord8Buf iraw (ir+2)
               c3 <- readWord8Buf iraw (ir+3)
               let x1 = chr4 c3 c2 c1 c0
-              if not (validate x1) then invalid (ir+4) else do
+              if not (validate x1) then invalid c0 c1 c2 c3 (ir+4) else do
               ow' <- writeCharBuf oraw ow x1
               loop (ir+4) ow'
          where
-           invalid ir' = case cfm of
-               ErrorOnCodingFailure
-                 | ir > ir0  -> done ir ow
-                 | otherwise -> ioe_decodingError
+           invalid c0 c1 c2 c3 ir' = case cfm of
                IgnoreCodingFailure -> loop ir' ow
                TransliterateCodingFailure -> do
                  ow' <- writeCharBuf oraw ow unrepresentableChar
                  loop ir' ow'
+               SurrogateEscapeFailure | (os-ow) < 4 -> done ir ow
+                                      | otherwise -> do
+                 -- We know that 4 characters is sufficient even with CHARBUF_UTF16
+                 -- because surrogate characters are always of the form 0xDCxx
+                 ow1 <- writeCharBuf oraw ow (decodeToSurrogateCharacter c0)
+                 ow2 <- writeCharBuf oraw ow1 (decodeToSurrogateCharacter c1)
+                 ow3 <- writeCharBuf oraw ow2 (decodeToSurrogateCharacter c2)
+                 ow4 <- writeCharBuf oraw ow3 (decodeToSurrogateCharacter c3)
+                 loop ir' ow4
+               _ | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }
@@ -279,7 +300,10 @@ ioe_decodingError = ioException
           "invalid UTF-32 byte sequence" Nothing Nothing)
 
 utf32be_encode :: EncodeBuffer
-utf32be_encode
+utf32be_encode = utf32be_encodeFailingWith ErrorOnCodingFailure
+
+utf32be_encodeFailingWith :: CodingFailureMode -> EncodeBuffer
+utf32be_encodeFailingWith cfm
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let 
@@ -291,17 +315,25 @@ utf32be_encode
         | os - ow < 4  =  done ir ow
         | otherwise = do
            (c,ir') <- readCharBuf iraw ir
-           let (c0,c1,c2,c3) = ord4 c
-           writeWord8Buf oraw ow     c0
-           writeWord8Buf oraw (ow+1) c1
-           writeWord8Buf oraw (ow+2) c2
-           writeWord8Buf oraw (ow+3) c3
-           loop ir' (ow+4)
+           case cfm of
+               SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+                 writeWord8Buf oraw ow b
+                 loop ir' (ow+1)
+               _ -> do
+                 let (c0,c1,c2,c3) = ord4 c
+                 writeWord8Buf oraw ow     c0
+                 writeWord8Buf oraw (ow+1) c1
+                 writeWord8Buf oraw (ow+2) c2
+                 writeWord8Buf oraw (ow+3) c3
+                 loop ir' (ow+4)
     in
     loop ir0 ow0
 
 utf32le_encode :: EncodeBuffer
-utf32le_encode
+utf32le_encode = utf32le_encodeFailingWith ErrorOnCodingFailure
+
+utf32le_encodeFailingWith :: CodingFailureMode -> EncodeBuffer
+utf32le_encodeFailingWith cfm
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let
@@ -313,12 +345,17 @@ utf32le_encode
         | os - ow < 4  =  done ir ow
         | otherwise = do
            (c,ir') <- readCharBuf iraw ir
-           let (c0,c1,c2,c3) = ord4 c
-           writeWord8Buf oraw ow     c3
-           writeWord8Buf oraw (ow+1) c2
-           writeWord8Buf oraw (ow+2) c1
-           writeWord8Buf oraw (ow+3) c0
-           loop ir' (ow+4)
+           case cfm of
+               SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+                 writeWord8Buf oraw ow b
+                 loop ir' (ow+1)
+               _ -> do
+                 let (c0,c1,c2,c3) = ord4 c
+                 writeWord8Buf oraw ow     c3
+                 writeWord8Buf oraw (ow+1) c2
+                 writeWord8Buf oraw (ow+2) c1
+                 writeWord8Buf oraw (ow+3) c0
+                 loop ir' (ow+4)
     in
     loop ir0 ow0
 

@@ -33,6 +33,7 @@ import GHC.Word
 #if !defined(mingw32_HOST_OS)
 import qualified GHC.IO.Encoding.Iconv  as Iconv
 #else
+import GHC.IO.Encoding.Failure
 import qualified GHC.IO.Encoding.CodePage as CodePage
 import Text.Read (reads)
 #endif

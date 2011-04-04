@@ -1,5 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude
            , BangPatterns
+           , PatternGuards
            , NondecreasingIndentation
   #-}
 {-# OPTIONS_GHC  -funbox-strict-fields #-}
@@ -36,6 +37,7 @@ import GHC.Num
 -- import GHC.IO
 import GHC.IO.Exception
 import GHC.IO.Buffer
+import GHC.IO.Encoding.Failure
 import GHC.IO.Encoding.Types
 import Data.Maybe
 
@@ -139,18 +141,20 @@ latin1_checked_encodeFailingWith cfm
         | ow >= os || ir >= iw =  done ir ow
         | otherwise = do
            (c,ir') <- readCharBuf iraw ir
-           if ord c > 0xff then invalid ir' else do
+           if ord c > 0xff then invalid c ir' else do
            writeWord8Buf oraw ow (fromIntegral (ord c))
            loop ir' (ow+1)
         where
-           invalid ir' = case cfm of
-              ErrorOnCodingFailure
-                | ir > ir0  -> done ir ow
-                | otherwise -> ioe_encodingError
+           invalid c ir' = case cfm of
               IgnoreCodingFailure -> loop ir' ow
+              SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+                writeWord8Buf oraw ow b
+                loop ir' (ow+1)
               TransliterateCodingFailure -> do
                 writeWord8Buf oraw ow unrepresentableByte
                 loop ir' (ow+1)
+              _ | ir > ir0  -> done ir ow
+                | otherwise -> ioe_encodingError
     in
     loop ir0 ow0
 

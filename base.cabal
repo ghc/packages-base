@@ -70,6 +70,7 @@ Library {
             GHC.IO.Encoding.Types,
             GHC.IO.Encoding.Iconv,
             GHC.IO.Encoding.CodePage,
+            GHC.IO.Encoding.Failure,
             GHC.IO.Handle,
             GHC.IO.Handle.Types,
             GHC.IO.Handle.Internals,

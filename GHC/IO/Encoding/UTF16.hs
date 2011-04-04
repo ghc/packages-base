@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP
            , NoImplicitPrelude
            , BangPatterns
+           , PatternGuards
            , NondecreasingIndentation
            , MagicHash
   #-}
@@ -47,6 +48,7 @@ import GHC.Num
 -- import GHC.IO
 import GHC.IO.Exception
 import GHC.IO.Buffer
+import GHC.IO.Encoding.Failure
 import GHC.IO.Encoding.Types
 import GHC.Word
 import Data.Bits
@@ -76,7 +78,7 @@ utf16FailingWith  :: CodingFailureMode -> TextEncoding
 utf16FailingWith cfm
  = TextEncoding { textEncodingName = "UTF-16" ++ codingFailureModeSuffix cfm,
                   mkTextDecoder = utf16_DF cfm,
-                  mkTextEncoder = utf16_EF }
+                  mkTextEncoder = utf16_EF cfm }
 
 utf16_DF :: CodingFailureMode -> IO (TextDecoder (Maybe DecodeBuffer))
 utf16_DF cfm = do
@@ -88,29 +90,32 @@ utf16_DF cfm = do
              setState = writeIORef seen_bom
           })
 
-utf16_EF :: IO (TextEncoder Bool)
-utf16_EF = do
+utf16_EF :: CodingFailureMode -> IO (TextEncoder Bool)
+utf16_EF cfm = do
   done_bom <- newIORef False
   return (BufferCodec {
-             encode   = utf16_encode done_bom,
+             encode   = utf16_encodeFailingWith cfm done_bom,
              close    = return (),
              getState = readIORef done_bom,
              setState = writeIORef done_bom
           })
 
 utf16_encode :: IORef Bool -> EncodeBuffer
-utf16_encode done_bom input
+utf16_encode = utf16_encodeFailingWith ErrorOnCodingFailure
+
+utf16_encodeFailingWith :: CodingFailureMode -> IORef Bool -> EncodeBuffer
+utf16_encodeFailingWith cfm done_bom input
   output@Buffer{ bufRaw=oraw, bufL=_, bufR=ow, bufSize=os }
  = do
   b <- readIORef done_bom
-  if b then utf16_native_encode input output
+  if b then utf16_native_encode cfm input output
        else if os - ow < 2
                then return (input,output)
                else do
                     writeIORef done_bom True
                     writeWord8Buf oraw ow     bom1
                     writeWord8Buf oraw (ow+1) bom2
-                    utf16_native_encode input output{ bufR = ow+2 }
+                    utf16_native_encode cfm input output{ bufR = ow+2 }
 
 utf16_decode :: IORef (Maybe DecodeBuffer) -> DecodeBuffer
 utf16_decode = utf16_decodeFailingWith ErrorOnCodingFailure
@@ -147,8 +152,8 @@ bomL = 0xff
 utf16_native_decode :: CodingFailureMode -> DecodeBuffer
 utf16_native_decode = utf16be_decodeFailingWith
 
-utf16_native_encode :: EncodeBuffer
-utf16_native_encode = utf16be_encode
+utf16_native_encode :: CodingFailureMode -> EncodeBuffer
+utf16_native_encode = utf16be_encodeFailingWith
 
 bom1 = bomB
 bom2 = bomL
@@ -163,7 +168,7 @@ utf16beFailingWith :: CodingFailureMode -> TextEncoding
 utf16beFailingWith cfm
   = TextEncoding { textEncodingName = "UTF-16BE" ++ codingFailureModeSuffix cfm,
                    mkTextDecoder = utf16be_DF cfm,
-                   mkTextEncoder = utf16be_EF }
+                   mkTextEncoder = utf16be_EF cfm }
 
 utf16be_DF :: CodingFailureMode -> IO (TextDecoder ())
 utf16be_DF cfm =
@@ -174,10 +179,10 @@ utf16be_DF cfm =
              setState = const $ return ()
           })
 
-utf16be_EF :: IO (TextEncoder ())
-utf16be_EF =
+utf16be_EF :: CodingFailureMode -> IO (TextEncoder ())
+utf16be_EF cfm =
   return (BufferCodec {
-             encode   = utf16be_encode,
+             encode   = utf16be_encodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -190,7 +195,7 @@ utf16leFailingWith :: CodingFailureMode -> TextEncoding
 utf16leFailingWith cfm
   = TextEncoding { textEncodingName = "UTF16-LE" ++ codingFailureModeSuffix cfm,
                    mkTextDecoder = utf16le_DF cfm,
-                   mkTextEncoder = utf16le_EF }
+                   mkTextEncoder = utf16le_EF cfm }
 
 utf16le_DF :: CodingFailureMode -> IO (TextDecoder ())
 utf16le_DF cfm =
@@ -201,10 +206,10 @@ utf16le_DF cfm =
              setState = const $ return ()
           })
 
-utf16le_EF :: IO (TextEncoder ())
-utf16le_EF =
+utf16le_EF :: CodingFailureMode -> IO (TextEncoder ())
+utf16le_EF cfm =
   return (BufferCodec {
-             encode   = utf16le_encode,
+             encode   = utf16le_encodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -233,18 +238,26 @@ utf16be_decodeFailingWith cfm
                       c2 <- readWord8Buf iraw (ir+2)
                       c3 <- readWord8Buf iraw (ir+3)
                       let x2 = fromIntegral c2 `shiftL` 8 + fromIntegral c3
-                      if not (validate2 x1 x2) then invalid (ir+4) else do
+                      if not (validate2 x1 x2) then invalid c0 c1 c2 c3 (ir+4) else do
                       ow' <- writeCharBuf oraw ow (chr2 x1 x2)
                       loop (ir+4) ow'
          where
-           invalid ir' = case cfm of
-               ErrorOnCodingFailure
-                 | ir > ir0  -> done ir ow
-                 | otherwise -> ioe_decodingError
+           invalid c0 c1 c2 c3 ir' = case cfm of
                IgnoreCodingFailure -> loop ir' ow
                TransliterateCodingFailure -> do
                  ow' <- writeCharBuf oraw ow unrepresentableChar
                  loop ir' ow'
+               SurrogateEscapeFailure | (os-ow) < 4 -> done ir ow
+                                      | otherwise -> do
+                 -- We know that 4 characters is sufficient even with CHARBUF_UTF16
+                 -- because surrogate characters are always of the form 0xDCxx
+                 ow1 <- writeCharBuf oraw ow (decodeToSurrogateCharacter c0)
+                 ow2 <- writeCharBuf oraw ow1 (decodeToSurrogateCharacter c1)
+                 ow3 <- writeCharBuf oraw ow2 (decodeToSurrogateCharacter c2)
+                 ow4 <- writeCharBuf oraw ow3 (decodeToSurrogateCharacter c3)
+                 loop ir' ow4
+               _ | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }
@@ -275,18 +288,26 @@ utf16le_decodeFailingWith cfm
                       c2 <- readWord8Buf iraw (ir+2)
                       c3 <- readWord8Buf iraw (ir+3)
                       let x2 = fromIntegral c3 `shiftL` 8 + fromIntegral c2
-                      if not (validate2 x1 x2) then invalid (ir+4) else do
+                      if not (validate2 x1 x2) then invalid c0 c1 c2 c3 (ir+4) else do
                       ow' <- writeCharBuf oraw ow (chr2 x1 x2)
                       loop (ir+4) ow'
          where
-           invalid ir' = case cfm of
-               ErrorOnCodingFailure
-                 | ir > ir0  -> done ir ow
-                 | otherwise -> ioe_decodingError
+           invalid c0 c1 c2 c3 ir' = case cfm of
                IgnoreCodingFailure -> loop ir' ow
                TransliterateCodingFailure -> do
                  ow' <- writeCharBuf oraw ow unrepresentableChar
                  loop ir' ow'
+               SurrogateEscapeFailure | (os-ow) < 4 -> done ir ow
+                                      | otherwise -> do
+                 -- We know that 4 characters is sufficient even with CHARBUF_UTF16
+                 -- because surrogate characters are always of the form 0xDCxx
+                 ow1 <- writeCharBuf oraw ow (decodeToSurrogateCharacter c0)
+                 ow2 <- writeCharBuf oraw ow1 (decodeToSurrogateCharacter c1)
+                 ow3 <- writeCharBuf oraw ow2 (decodeToSurrogateCharacter c2)
+                 ow4 <- writeCharBuf oraw ow3 (decodeToSurrogateCharacter c3)
+                 loop ir' ow4
+               _ | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }
@@ -301,7 +322,10 @@ ioe_decodingError = ioException
           "invalid UTF-16 byte sequence" Nothing Nothing)
 
 utf16be_encode :: EncodeBuffer
-utf16be_encode
+utf16be_encode = utf16be_encodeFailingWith ErrorOnCodingFailure
+
+utf16be_encodeFailingWith :: CodingFailureMode -> EncodeBuffer
+utf16be_encodeFailingWith cfm
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let 
@@ -315,9 +339,14 @@ utf16be_encode
            (c,ir') <- readCharBuf iraw ir
            case ord c of
              x | x < 0x10000 -> do
-                    writeWord8Buf oraw ow     (fromIntegral (x `shiftR` 8))
-                    writeWord8Buf oraw (ow+1) (fromIntegral x)
-                    loop ir' (ow+2)
+                    case cfm of
+                      SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+                        writeWord8Buf oraw ow b
+                        loop ir' (ow+1)
+                      _ -> do
+                        writeWord8Buf oraw ow     (fromIntegral (x `shiftR` 8))
+                        writeWord8Buf oraw (ow+1) (fromIntegral x)
+                        loop ir' (ow+2)
                | otherwise -> do
                     if os - ow < 4 then done ir ow else do
                     let 
@@ -337,7 +366,10 @@ utf16be_encode
     loop ir0 ow0
 
 utf16le_encode :: EncodeBuffer
-utf16le_encode
+utf16le_encode = utf16le_encodeFailingWith ErrorOnCodingFailure
+
+utf16le_encodeFailingWith :: CodingFailureMode -> EncodeBuffer
+utf16le_encodeFailingWith cfm
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let
@@ -351,9 +383,14 @@ utf16le_encode
            (c,ir') <- readCharBuf iraw ir
            case ord c of
              x | x < 0x10000 -> do
-                    writeWord8Buf oraw ow     (fromIntegral x)
-                    writeWord8Buf oraw (ow+1) (fromIntegral (x `shiftR` 8))
-                    loop ir' (ow+2)
+                    case cfm of
+                      SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+                        writeWord8Buf oraw ow b
+                        loop ir' (ow+1)
+                      _ -> do
+                        writeWord8Buf oraw ow     (fromIntegral x)
+                        writeWord8Buf oraw (ow+1) (fromIntegral (x `shiftR` 8))
+                        loop ir' (ow+2)
                | otherwise ->
                     if os - ow < 4 then done ir ow else do
                     let 

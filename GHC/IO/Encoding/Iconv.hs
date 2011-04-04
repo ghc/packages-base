@@ -41,6 +41,7 @@ import Foreign.C
 import Data.Maybe
 import GHC.Base
 import GHC.IO.Buffer
+import GHC.IO.Encoding.Failure
 import GHC.IO.Encoding.Types
 import GHC.List (span)
 import GHC.Num
@@ -178,23 +179,36 @@ newIConv from to fn =
 iconvDecode :: CodingFailureMode
             -> IConv -> Buffer Word8 -> Buffer CharBufElem
             -> IO (Buffer Word8, Buffer CharBufElem)
-iconvDecode cfm iconv_t ibuf obuf = iconvRecode cfm transcribe iconv_t ibuf 0 obuf char_shift
+iconvDecode cfm iconv_t ibuf obuf = iconvRecode cfm transcribe surrogatify iconv_t ibuf 0 obuf char_shift
   where transcribe output@Buffer{ bufRaw=oraw, bufR=ow }
           | isFullBuffer output = Nothing
           | otherwise           = Just (do { ow' <- writeCharBuf oraw ow unrepresentableChar; return output { bufR = ow' } })
+        surrogatify input@Buffer{ bufRaw=iraw, bufL=ir } output@Buffer{ bufRaw=oraw, bufR=ow } = do
+            b <- readWord8Buf iraw ir
+            ow' <- writeCharBuf oraw ow (decodeToSurrogateCharacter b)
+            return $ Just (input { bufL = ir+1 }, output { bufR = ow' })
 
 iconvEncode :: CodingFailureMode
             -> IConv -> Buffer CharBufElem -> Buffer Word8
             -> IO (Buffer CharBufElem, Buffer Word8)
-iconvEncode cfm iconv_t ibuf obuf = iconvRecode cfm transcribe iconv_t ibuf char_shift obuf 0
+iconvEncode cfm iconv_t ibuf obuf = iconvRecode cfm transcribe surrogatify iconv_t ibuf char_shift obuf 0
   where transcribe output@Buffer{ bufRaw=oraw, bufR=ow }
           | isFullBuffer output = Nothing
           | otherwise           = Just (do { writeWord8Buf oraw ow unrepresentableByte; return output { bufR = ow+1 } })
+        surrogatify input@Buffer{ bufRaw=iraw, bufL=ir } output@Buffer{ bufRaw=oraw, bufR=ow } = do
+            (c, ir') <- readCharBuf iraw ir
+            case encodeSurrogateCharacter c of
+                Nothing -> return Nothing
+                Just b -> do
+                    writeWord8Buf oraw ow b
+                    return $ Just (input { bufL = ir' }, output { bufR = ow+1 })
 
-iconvRecode :: CodingFailureMode -> (Buffer b -> Maybe (IO (Buffer b)))
+iconvRecode :: CodingFailureMode
+            -> (Buffer b -> Maybe (IO (Buffer b)))                       -- ^ How to transcribe
+            -> (Buffer a -> Buffer b -> IO (Maybe (Buffer a, Buffer b))) -- ^ How to encode surrogate
             -> IConv -> Buffer a -> Int -> Buffer b -> Int
             -> IO (Buffer a, Buffer b)
-iconvRecode cfm transcribe iconv_t input0 iscale output0 oscale = go input0 output0
+iconvRecode cfm transcribe surrogatify iconv_t input0 iscale output0 oscale = go input0 output0
   where
     go input@Buffer{  bufRaw=iraw, bufL=ir, bufR=iw, bufSize=_  }
        output@Buffer{ bufRaw=oraw, bufL=_,  bufR=ow, bufSize=os }
@@ -244,13 +258,27 @@ iconvRecode cfm transcribe iconv_t input0 iscale output0 oscale = go input0 outp
             
                  -- Custom code to try to ignore invalid byte sequences. Not as good as just using the //IGNORE
                  -- suffix to iconv, but we can't rely on that behaviour
-              e | e == eINVAL, IgnoreCodingFailure        <- cfm -> go (bufferAdjustL 1 new_input) new_output
-                | e == eINVAL, TransliterateCodingFailure <- cfm -> case transcribe new_output of
-                                                                      Nothing  -> return (new_input, new_output)
-                                                                      Just act -> act >>= go (bufferAdjustL 1 new_input)
               e -> do
-                      iconv_trace ("iconv returned error: " ++ show (errnoToIOError "iconv" e Nothing Nothing) ++ " "
-                                                            ++ show (new_inleft', (iw-ir), new_outleft', (os-ow)))
-                      throwErrno "iconvRecoder" -- illegal sequence, or some other error
+                  mb_handler <- case cfm of
+                      _ | e /= eINVAL, e /= eILSEQ -> return Nothing
+                      ErrorOnCodingFailure         -> return Nothing
+                      IgnoreCodingFailure          -> return $ Just (go (bufferAdjustL 1 new_input) new_output)
+                      SurrogateEscapeFailure
+                        | isEmptyBuffer new_input || isFullBuffer new_output
+                        -> return $ Just $ return (new_input, new_output) -- Output/input overflow
+                        | otherwise -> do
+                          mb_inout <- surrogatify new_input new_output
+                          case mb_inout of
+                              Nothing -> return Nothing
+                              Just (new_input', new_output') -> return $ Just $ go new_input' new_output'
+                      TransliterateCodingFailure   -> return $ Just $ case transcribe new_output of
+                                                                        Nothing  -> return (new_input, new_output)
+                                                                        Just act -> act >>= go (bufferAdjustL 1 new_input)
+                  case mb_handler of
+                      Just handler -> handler
+                      Nothing -> do
+                          iconv_trace ("iconv returned error: " ++ show (errnoToIOError "iconv" e Nothing Nothing) ++ " "
+                                                                ++ show (new_inleft', (iw-ir), new_outleft', (os-ow)))
+                          throwErrno "iconvRecoder" -- illegal sequence, or some other error
 
 #endif /* !mingw32_HOST_OS */
