@@ -2,6 +2,7 @@
            , NoImplicitPrelude
            , ForeignFunctionInterface
            , NondecreasingIndentation
+           , PatternGuards
   #-}
 
 -----------------------------------------------------------------------------
@@ -26,7 +27,7 @@ module GHC.IO.Encoding.Iconv (
    utf8, 
    utf16, utf16le, utf16be,
    utf32, utf32le, utf32be,
-   localeEncoding
+   localeEncoding, localeEncoding_ignore
 #endif
  ) where
 
@@ -109,6 +110,10 @@ localeEncodingName = unsafePerformIO $ do
 localeEncoding :: TextEncoding
 localeEncoding = unsafePerformIO $ mkTextEncoding localeEncodingName
 
+{-# NOINLINE localeEncoding_ignore #-}
+localeEncoding_ignore :: TextEncoding
+localeEncoding_ignore = unsafePerformIO $ mkTextEncodingFailingWith IgnoreCodingFailure localeEncodingName
+
 -- We hope iconv_t is a storable type.  It should be, since it has at least the
 -- value -1, which is a possible return value from iconv_open.
 type IConv = CLong -- ToDo: (#type iconv_t)
@@ -140,11 +145,14 @@ char_shift | charSize == 2 = 1
            | otherwise     = 2
 
 mkTextEncoding :: String -> IO TextEncoding
-mkTextEncoding charset = do
+mkTextEncoding = mkTextEncodingFailingWith ErrorOnCodingFailure
+
+mkTextEncodingFailingWith :: CodingFailureMode -> String -> IO TextEncoding
+mkTextEncodingFailingWith cfm charset = do
   return (TextEncoding { 
                 textEncodingName = charset,
-		mkTextDecoder = newIConv raw_charset (haskellChar ++ suffix) iconvDecode,
-		mkTextEncoder = newIConv haskellChar charset iconvEncode})
+		mkTextDecoder = newIConv raw_charset (haskellChar ++ suffix) (iconvDecode cfm),
+		mkTextEncoder = newIConv haskellChar charset (iconvEncode cfm)})
   where
     -- An annoying feature of GNU iconv is that the //PREFIXES only take
     -- effect when they appear on the tocode parameter to iconv_open:
@@ -167,67 +175,82 @@ newIConv from to fn =
                 setState = const $ return ()
                 }
 
-iconvDecode :: IConv -> Buffer Word8 -> Buffer CharBufElem
-	     -> IO (Buffer Word8, Buffer CharBufElem)
-iconvDecode iconv_t ibuf obuf = iconvRecode iconv_t ibuf 0 obuf char_shift
+iconvDecode :: CodingFailureMode
+            -> IConv -> Buffer Word8 -> Buffer CharBufElem
+            -> IO (Buffer Word8, Buffer CharBufElem)
+iconvDecode cfm iconv_t ibuf obuf = iconvRecode cfm transcribe iconv_t ibuf 0 obuf char_shift
+  where transcribe output@Buffer{ bufRaw=oraw, bufR=ow }
+          | isFullBuffer output = Nothing
+          | otherwise           = Just (do { ow' <- writeCharBuf oraw ow unrepresentableChar; return output { bufR = ow' } })
 
-iconvEncode :: IConv -> Buffer CharBufElem -> Buffer Word8
-	     -> IO (Buffer CharBufElem, Buffer Word8)
-iconvEncode iconv_t ibuf obuf = iconvRecode iconv_t ibuf char_shift obuf 0
+iconvEncode :: CodingFailureMode
+            -> IConv -> Buffer CharBufElem -> Buffer Word8
+            -> IO (Buffer CharBufElem, Buffer Word8)
+iconvEncode cfm iconv_t ibuf obuf = iconvRecode cfm transcribe iconv_t ibuf char_shift obuf 0
+  where transcribe output@Buffer{ bufRaw=oraw, bufR=ow }
+          | isFullBuffer output = Nothing
+          | otherwise           = Just (do { writeWord8Buf oraw ow unrepresentableByte; return output { bufR = ow+1 } })
 
-iconvRecode :: IConv -> Buffer a -> Int -> Buffer b -> Int 
-  -> IO (Buffer a, Buffer b)
-iconvRecode iconv_t
-  input@Buffer{  bufRaw=iraw, bufL=ir, bufR=iw, bufSize=_  }  iscale
-  output@Buffer{ bufRaw=oraw, bufL=_,  bufR=ow, bufSize=os }  oscale
-  = do
-    iconv_trace ("haskelChar=" ++ show haskellChar)
-    iconv_trace ("iconvRecode before, input=" ++ show (summaryBuffer input))
-    iconv_trace ("iconvRecode before, output=" ++ show (summaryBuffer output))
-    withRawBuffer iraw $ \ piraw -> do
-    withRawBuffer oraw $ \ poraw -> do
-    with (piraw `plusPtr` (ir `shiftL` iscale)) $ \ p_inbuf -> do
-    with (poraw `plusPtr` (ow `shiftL` oscale)) $ \ p_outbuf -> do
-    with (fromIntegral ((iw-ir) `shiftL` iscale)) $ \ p_inleft -> do
-    with (fromIntegral ((os-ow) `shiftL` oscale)) $ \ p_outleft -> do
-      res <- hs_iconv iconv_t p_inbuf p_inleft p_outbuf p_outleft
-      new_inleft  <- peek p_inleft
-      new_outleft <- peek p_outleft
-      let 
-	  new_inleft'  = fromIntegral new_inleft `shiftR` iscale
-	  new_outleft' = fromIntegral new_outleft `shiftR` oscale
-	  new_input  
-            | new_inleft == 0  = input { bufL = 0, bufR = 0 }
-	    | otherwise        = input { bufL = iw - new_inleft' }
-	  new_output = output{ bufR = os - new_outleft' }
-      iconv_trace ("iconv res=" ++ show res)
-      iconv_trace ("iconvRecode after,  input=" ++ show (summaryBuffer new_input))
-      iconv_trace ("iconvRecode after,  output=" ++ show (summaryBuffer new_output))
-      if (res /= -1)
-	then do -- all input translated
-	   return (new_input, new_output)
-	else do
-      errno <- getErrno
-      case errno of
-        e |  e == eINVAL || e == e2BIG
-          || e == eILSEQ && new_inleft' /= (iw-ir) -> do
-            iconv_trace ("iconv ignoring error: " ++ show (errnoToIOError "iconv" e Nothing Nothing))
-                -- Output overflow is harmless
-                --
-                -- Similarly, we ignore EILSEQ unless we converted no
-                -- characters.  Sometimes iconv reports EILSEQ for a
-                -- character in the input even when there is no room
-                -- in the output; in this case we might be about to
-                -- change the encoding anyway, so the following bytes
-                -- could very well be in a different encoding.
-                -- This also helps with pinpointing EILSEQ errors: we
-                -- don't report it until the rest of the characters in
-                -- the buffer have been drained.
+iconvRecode :: CodingFailureMode -> (Buffer b -> Maybe (IO (Buffer b)))
+            -> IConv -> Buffer a -> Int -> Buffer b -> Int
+            -> IO (Buffer a, Buffer b)
+iconvRecode cfm transcribe iconv_t input0 iscale output0 oscale = go input0 output0
+  where
+    go input@Buffer{  bufRaw=iraw, bufL=ir, bufR=iw, bufSize=_  }
+       output@Buffer{ bufRaw=oraw, bufL=_,  bufR=ow, bufSize=os }
+      = do
+        iconv_trace ("haskelChar=" ++ show haskellChar)
+        iconv_trace ("iconvRecode before, input=" ++ show (summaryBuffer input))
+        iconv_trace ("iconvRecode before, output=" ++ show (summaryBuffer output))
+        withRawBuffer iraw $ \ piraw -> do
+        withRawBuffer oraw $ \ poraw -> do
+        with (piraw `plusPtr` (ir `shiftL` iscale)) $ \ p_inbuf -> do
+        with (poraw `plusPtr` (ow `shiftL` oscale)) $ \ p_outbuf -> do
+        with (fromIntegral ((iw-ir) `shiftL` iscale)) $ \ p_inleft -> do
+        with (fromIntegral ((os-ow) `shiftL` oscale)) $ \ p_outleft -> do
+          res <- hs_iconv iconv_t p_inbuf p_inleft p_outbuf p_outleft
+          new_inleft  <- peek p_inleft
+          new_outleft <- peek p_outleft
+          let new_inleft'  = fromIntegral new_inleft `shiftR` iscale
+              new_outleft' = fromIntegral new_outleft `shiftR` oscale
+              new_input  
+                | new_inleft == 0  = input { bufL = 0, bufR = 0 }
+                | otherwise        = input { bufL = iw - new_inleft' }
+              new_output = output{ bufR = os - new_outleft' }
+          iconv_trace ("iconv res=" ++ show res)
+          iconv_trace ("iconvRecode after,  input=" ++ show (summaryBuffer new_input))
+          iconv_trace ("iconvRecode after,  output=" ++ show (summaryBuffer new_output))
+          if (res /= -1)
+           then do -- all input translated
             return (new_input, new_output)
-
-        e -> do
-                iconv_trace ("iconv returned error: " ++ show (errnoToIOError "iconv" e Nothing Nothing))
-                throwErrno "iconvRecoder"
-			-- illegal sequence, or some other error
+           else do
+            errno <- getErrno
+            case errno of
+              e |  e == eINVAL || e == e2BIG
+                || e == eILSEQ && new_inleft' /= (iw-ir) -> do
+                  iconv_trace ("iconv ignoring error: " ++ show (errnoToIOError "iconv" e Nothing Nothing))
+                      -- Output overflow is harmless
+                      --
+                      -- Similarly, we ignore EILSEQ unless we converted no
+                      -- characters.  Sometimes iconv reports EILSEQ for a
+                      -- character in the input even when there is no room
+                      -- in the output; in this case we might be about to
+                      -- change the encoding anyway, so the following bytes
+                      -- could very well be in a different encoding.
+                      -- This also helps with pinpointing EILSEQ errors: we
+                      -- don't report it until the rest of the characters in
+                      -- the buffer have been drained.
+                  return (new_input, new_output)
+            
+                 -- Custom code to try to ignore invalid byte sequences. Not as good as just using the //IGNORE
+                 -- suffix to iconv, but we can't rely on that behaviour
+              e | e == eINVAL, IgnoreCodingFailure        <- cfm -> go (bufferAdjustL 1 new_input) new_output
+                | e == eINVAL, TransliterateCodingFailure <- cfm -> case transcribe new_output of
+                                                                      Nothing  -> return (new_input, new_output)
+                                                                      Just act -> act >>= go (bufferAdjustL 1 new_input)
+              e -> do
+                      iconv_trace ("iconv returned error: " ++ show (errnoToIOError "iconv" e Nothing Nothing) ++ " "
+                                                            ++ show (new_inleft', (iw-ir), new_outleft', (os-ow)))
+                      throwErrno "iconvRecoder" -- illegal sequence, or some other error
 
 #endif /* !mingw32_HOST_OS */

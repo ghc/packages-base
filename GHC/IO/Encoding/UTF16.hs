@@ -26,14 +26,17 @@
 
 module GHC.IO.Encoding.UTF16 (
   utf16,
+  utf16FailingWith,
   utf16_decode,
   utf16_encode,
 
   utf16be,
+  utf16beFailingWith,
   utf16be_decode,
   utf16be_encode,
 
   utf16le,
+  utf16leFailingWith,
   utf16le_decode,
   utf16le_encode,
   ) where
@@ -67,15 +70,19 @@ puts s = do withCAStringLen (s++"\n") $ \(p,len) ->
 -- The UTF-16 codec: either UTF16BE or UTF16LE with a BOM
 
 utf16  :: TextEncoding
-utf16 = TextEncoding { textEncodingName = "UTF-16",
-                       mkTextDecoder = utf16_DF,
- 	               mkTextEncoder = utf16_EF }
+utf16 = utf16FailingWith ErrorOnCodingFailure
 
-utf16_DF :: IO (TextDecoder (Maybe DecodeBuffer))
-utf16_DF = do
+utf16FailingWith  :: CodingFailureMode -> TextEncoding
+utf16FailingWith cfm
+ = TextEncoding { textEncodingName = "UTF-16" ++ codingFailureModeSuffix cfm,
+                  mkTextDecoder = utf16_DF cfm,
+                  mkTextEncoder = utf16_EF }
+
+utf16_DF :: CodingFailureMode -> IO (TextDecoder (Maybe DecodeBuffer))
+utf16_DF cfm = do
   seen_bom <- newIORef Nothing
   return (BufferCodec {
-             encode   = utf16_decode seen_bom,
+             encode   = utf16_decodeFailingWith cfm seen_bom,
              close    = return (),
              getState = readIORef seen_bom,
              setState = writeIORef seen_bom
@@ -106,7 +113,10 @@ utf16_encode done_bom input
                     utf16_native_encode input output{ bufR = ow+2 }
 
 utf16_decode :: IORef (Maybe DecodeBuffer) -> DecodeBuffer
-utf16_decode seen_bom
+utf16_decode = utf16_decodeFailingWith ErrorOnCodingFailure
+
+utf16_decodeFailingWith :: CodingFailureMode -> IORef (Maybe DecodeBuffer) -> DecodeBuffer
+utf16_decodeFailingWith cfm seen_bom
   input@Buffer{  bufRaw=iraw, bufL=ir, bufR=iw,  bufSize=_  }
   output
  = do
@@ -119,14 +129,14 @@ utf16_decode seen_bom
        c1 <- readWord8Buf iraw (ir+1)
        case () of
         _ | c0 == bomB && c1 == bomL -> do
-               writeIORef seen_bom (Just utf16be_decode)
-               utf16be_decode input{ bufL= ir+2 } output
+               writeIORef seen_bom (Just (utf16be_decodeFailingWith cfm))
+               utf16be_decodeFailingWith cfm input{ bufL= ir+2 } output
           | c0 == bomL && c1 == bomB -> do
-               writeIORef seen_bom (Just utf16le_decode)
-               utf16le_decode input{ bufL= ir+2 } output
+               writeIORef seen_bom (Just (utf16le_decodeFailingWith cfm))
+               utf16le_decodeFailingWith cfm input{ bufL= ir+2 } output
           | otherwise -> do
-               writeIORef seen_bom (Just utf16_native_decode)
-               utf16_native_decode input output
+               writeIORef seen_bom (Just (utf16_native_decode cfm))
+               utf16_native_decode cfm input output
 
 
 bomB, bomL, bom1, bom2 :: Word8
@@ -134,8 +144,8 @@ bomB = 0xfe
 bomL = 0xff
 
 -- choose UTF-16BE by default for UTF-16 output
-utf16_native_decode :: DecodeBuffer
-utf16_native_decode = utf16be_decode
+utf16_native_decode :: CodingFailureMode -> DecodeBuffer
+utf16_native_decode = utf16be_decodeFailingWith
 
 utf16_native_encode :: EncodeBuffer
 utf16_native_encode = utf16be_encode
@@ -147,14 +157,18 @@ bom2 = bomL
 -- UTF16LE and UTF16BE
 
 utf16be :: TextEncoding
-utf16be = TextEncoding { textEncodingName = "UTF-16BE",
-                         mkTextDecoder = utf16be_DF,
- 	                 mkTextEncoder = utf16be_EF }
+utf16be = utf16beFailingWith ErrorOnCodingFailure
 
-utf16be_DF :: IO (TextDecoder ())
-utf16be_DF =
+utf16beFailingWith :: CodingFailureMode -> TextEncoding
+utf16beFailingWith cfm
+  = TextEncoding { textEncodingName = "UTF-16BE" ++ codingFailureModeSuffix cfm,
+                   mkTextDecoder = utf16be_DF cfm,
+                   mkTextEncoder = utf16be_EF }
+
+utf16be_DF :: CodingFailureMode -> IO (TextDecoder ())
+utf16be_DF cfm =
   return (BufferCodec {
-             encode   = utf16be_decode,
+             encode   = utf16be_decodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -170,14 +184,18 @@ utf16be_EF =
           })
 
 utf16le :: TextEncoding
-utf16le = TextEncoding { textEncodingName = "UTF16-LE",
-                         mkTextDecoder = utf16le_DF,
- 	                 mkTextEncoder = utf16le_EF }
+utf16le = utf16leFailingWith ErrorOnCodingFailure
 
-utf16le_DF :: IO (TextDecoder ())
-utf16le_DF =
+utf16leFailingWith :: CodingFailureMode -> TextEncoding
+utf16leFailingWith cfm
+  = TextEncoding { textEncodingName = "UTF16-LE" ++ codingFailureModeSuffix cfm,
+                   mkTextDecoder = utf16le_DF cfm,
+                   mkTextEncoder = utf16le_EF }
+
+utf16le_DF :: CodingFailureMode -> IO (TextDecoder ())
+utf16le_DF cfm =
   return (BufferCodec {
-             encode   = utf16le_decode,
+             encode   = utf16le_decodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -194,7 +212,10 @@ utf16le_EF =
 
 
 utf16be_decode :: DecodeBuffer
-utf16be_decode 
+utf16be_decode = utf16be_decodeFailingWith ErrorOnCodingFailure
+
+utf16be_decodeFailingWith :: CodingFailureMode -> DecodeBuffer
+utf16be_decodeFailingWith cfm 
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let 
@@ -212,11 +233,18 @@ utf16be_decode
                       c2 <- readWord8Buf iraw (ir+2)
                       c3 <- readWord8Buf iraw (ir+3)
                       let x2 = fromIntegral c2 `shiftL` 8 + fromIntegral c3
-                      if not (validate2 x1 x2) then invalid else do
+                      if not (validate2 x1 x2) then invalid (ir+4) else do
                       ow' <- writeCharBuf oraw ow (chr2 x1 x2)
                       loop (ir+4) ow'
          where
-           invalid = if ir > ir0 then done ir ow else ioe_decodingError
+           invalid ir' = case cfm of
+               ErrorOnCodingFailure
+                 | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
+               IgnoreCodingFailure -> loop ir' ow
+               TransliterateCodingFailure -> do
+                 ow' <- writeCharBuf oraw ow unrepresentableChar
+                 loop ir' ow'
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }
@@ -226,7 +254,10 @@ utf16be_decode
     loop ir0 ow0
 
 utf16le_decode :: DecodeBuffer
-utf16le_decode 
+utf16le_decode = utf16le_decodeFailingWith ErrorOnCodingFailure
+
+utf16le_decodeFailingWith :: CodingFailureMode -> DecodeBuffer
+utf16le_decodeFailingWith cfm
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let 
@@ -244,11 +275,18 @@ utf16le_decode
                       c2 <- readWord8Buf iraw (ir+2)
                       c3 <- readWord8Buf iraw (ir+3)
                       let x2 = fromIntegral c3 `shiftL` 8 + fromIntegral c2
-                      if not (validate2 x1 x2) then invalid else do
+                      if not (validate2 x1 x2) then invalid (ir+4) else do
                       ow' <- writeCharBuf oraw ow (chr2 x1 x2)
                       loop (ir+4) ow'
          where
-           invalid = if ir > ir0 then done ir ow else ioe_decodingError
+           invalid ir' = case cfm of
+               ErrorOnCodingFailure
+                 | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
+               IgnoreCodingFailure -> loop ir' ow
+               TransliterateCodingFailure -> do
+                 ow' <- writeCharBuf oraw ow unrepresentableChar
+                 loop ir' ow'
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }

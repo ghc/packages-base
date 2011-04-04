@@ -25,14 +25,17 @@
 
 module GHC.IO.Encoding.UTF32 (
   utf32,
+  utf32FailingWith,
   utf32_decode,
   utf32_encode,
 
   utf32be,
+  utf32beFailingWith,
   utf32be_decode,
   utf32be_encode,
 
   utf32le,
+  utf32leFailingWith,
   utf32le_decode,
   utf32le_encode,
   ) where
@@ -53,15 +56,19 @@ import GHC.IORef
 -- The UTF-32 codec: either UTF-32BE or UTF-32LE with a BOM
 
 utf32  :: TextEncoding
-utf32 = TextEncoding { textEncodingName = "UTF-32",
-                       mkTextDecoder = utf32_DF,
- 	               mkTextEncoder = utf32_EF }
+utf32 = utf32FailingWith ErrorOnCodingFailure
 
-utf32_DF :: IO (TextDecoder (Maybe DecodeBuffer))
-utf32_DF = do
+utf32FailingWith :: CodingFailureMode -> TextEncoding
+utf32FailingWith cfm
+  = TextEncoding { textEncodingName = "UTF-32" ++ codingFailureModeSuffix cfm,
+                   mkTextDecoder = utf32_DF cfm,
+                   mkTextEncoder = utf32_EF }
+
+utf32_DF :: CodingFailureMode -> IO (TextDecoder (Maybe DecodeBuffer))
+utf32_DF cfm = do
   seen_bom <- newIORef Nothing
   return (BufferCodec {
-             encode   = utf32_decode seen_bom,
+             encode   = utf32_decodeFailingWith cfm seen_bom,
              close    = return (),
              getState = readIORef seen_bom,
              setState = writeIORef seen_bom
@@ -94,7 +101,10 @@ utf32_encode done_bom input
                     utf32_native_encode input output{ bufR = ow+4 }
 
 utf32_decode :: IORef (Maybe DecodeBuffer) -> DecodeBuffer
-utf32_decode seen_bom
+utf32_decode = utf32_decodeFailingWith ErrorOnCodingFailure
+
+utf32_decodeFailingWith :: CodingFailureMode -> IORef (Maybe DecodeBuffer) -> DecodeBuffer
+utf32_decodeFailingWith cfm seen_bom
   input@Buffer{  bufRaw=iraw, bufL=ir, bufR=iw,  bufSize=_  }
   output
  = do
@@ -109,14 +119,14 @@ utf32_decode seen_bom
        c3 <- readWord8Buf iraw (ir+3)
        case () of
         _ | c0 == bom0 && c1 == bom1 && c2 == bom2 && c3 == bom3 -> do
-               writeIORef seen_bom (Just utf32be_decode)
-               utf32be_decode input{ bufL= ir+4 } output
+               writeIORef seen_bom (Just (utf32be_decodeFailingWith cfm))
+               utf32be_decodeFailingWith cfm input{ bufL= ir+4 } output
         _ | c0 == bom3 && c1 == bom2 && c2 == bom1 && c3 == bom0 -> do
-               writeIORef seen_bom (Just utf32le_decode)
-               utf32le_decode input{ bufL= ir+4 } output
+               writeIORef seen_bom (Just (utf32le_decodeFailingWith cfm))
+               utf32le_decodeFailingWith cfm input{ bufL= ir+4 } output
           | otherwise -> do
-               writeIORef seen_bom (Just utf32_native_decode)
-               utf32_native_decode input output
+               writeIORef seen_bom (Just (utf32_native_decode cfm))
+               utf32_native_decode cfm input output
 
 
 bom0, bom1, bom2, bom3 :: Word8
@@ -126,8 +136,8 @@ bom2 = 0xfe
 bom3 = 0xff
 
 -- choose UTF-32BE by default for UTF-32 output
-utf32_native_decode :: DecodeBuffer
-utf32_native_decode = utf32be_decode
+utf32_native_decode :: CodingFailureMode -> DecodeBuffer
+utf32_native_decode = utf32be_decodeFailingWith
 
 utf32_native_encode :: EncodeBuffer
 utf32_native_encode = utf32be_encode
@@ -136,14 +146,18 @@ utf32_native_encode = utf32be_encode
 -- UTF32LE and UTF32BE
 
 utf32be :: TextEncoding
-utf32be = TextEncoding { textEncodingName = "UTF-32BE",
-                         mkTextDecoder = utf32be_DF,
- 	                 mkTextEncoder = utf32be_EF }
+utf32be = utf32beFailingWith ErrorOnCodingFailure
 
-utf32be_DF :: IO (TextDecoder ())
-utf32be_DF =
+utf32beFailingWith :: CodingFailureMode -> TextEncoding
+utf32beFailingWith cfm
+  = TextEncoding { textEncodingName = "UTF-32BE" ++ codingFailureModeSuffix cfm,
+                   mkTextDecoder = utf32be_DF cfm,
+                   mkTextEncoder = utf32be_EF }
+
+utf32be_DF :: CodingFailureMode -> IO (TextDecoder ())
+utf32be_DF cfm =
   return (BufferCodec {
-             encode   = utf32be_decode,
+             encode   = utf32be_decodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -160,14 +174,18 @@ utf32be_EF =
 
 
 utf32le :: TextEncoding
-utf32le = TextEncoding { textEncodingName = "UTF-32LE",
-                         mkTextDecoder = utf32le_DF,
- 	                 mkTextEncoder = utf32le_EF }
+utf32le = utf32leFailingWith ErrorOnCodingFailure
 
-utf32le_DF :: IO (TextDecoder ())
-utf32le_DF =
+utf32leFailingWith :: CodingFailureMode -> TextEncoding
+utf32leFailingWith cfm
+  = TextEncoding { textEncodingName = "UTF-32LE" ++ codingFailureModeSuffix cfm,
+                   mkTextDecoder = utf32le_DF cfm,
+                   mkTextEncoder = utf32le_EF }
+
+utf32le_DF :: CodingFailureMode -> IO (TextDecoder ())
+utf32le_DF cfm =
   return (BufferCodec {
-             encode   = utf32le_decode,
+             encode   = utf32le_decodeFailingWith cfm,
              close    = return (),
              getState = return (),
              setState = const $ return ()
@@ -184,7 +202,10 @@ utf32le_EF =
 
 
 utf32be_decode :: DecodeBuffer
-utf32be_decode 
+utf32be_decode = utf32be_decodeFailingWith ErrorOnCodingFailure
+
+utf32be_decodeFailingWith :: CodingFailureMode -> DecodeBuffer
+utf32be_decodeFailingWith cfm
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let 
@@ -196,11 +217,18 @@ utf32be_decode
               c2 <- readWord8Buf iraw (ir+2)
               c3 <- readWord8Buf iraw (ir+3)
               let x1 = chr4 c0 c1 c2 c3
-              if not (validate x1) then invalid else do
+              if not (validate x1) then invalid (ir+4) else do
               ow' <- writeCharBuf oraw ow x1
               loop (ir+4) ow'
          where
-           invalid = if ir > ir0 then done ir ow else ioe_decodingError
+           invalid ir' = case cfm of
+               ErrorOnCodingFailure
+                 | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
+               IgnoreCodingFailure -> loop ir' ow
+               TransliterateCodingFailure -> do
+                 ow' <- writeCharBuf oraw ow unrepresentableChar
+                 loop ir' ow'
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }
@@ -210,7 +238,10 @@ utf32be_decode
     loop ir0 ow0
 
 utf32le_decode :: DecodeBuffer
-utf32le_decode 
+utf32le_decode = utf32le_decodeFailingWith ErrorOnCodingFailure
+
+utf32le_decodeFailingWith :: CodingFailureMode -> DecodeBuffer
+utf32le_decodeFailingWith cfm
   input@Buffer{  bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
   output@Buffer{ bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
  = let 
@@ -222,11 +253,18 @@ utf32le_decode
               c2 <- readWord8Buf iraw (ir+2)
               c3 <- readWord8Buf iraw (ir+3)
               let x1 = chr4 c3 c2 c1 c0
-              if not (validate x1) then invalid else do
+              if not (validate x1) then invalid (ir+4) else do
               ow' <- writeCharBuf oraw ow x1
               loop (ir+4) ow'
          where
-           invalid = if ir > ir0 then done ir ow else ioe_decodingError
+           invalid ir' = case cfm of
+               ErrorOnCodingFailure
+                 | ir > ir0  -> done ir ow
+                 | otherwise -> ioe_decodingError
+               IgnoreCodingFailure -> loop ir' ow
+               TransliterateCodingFailure -> do
+                 ow' <- writeCharBuf oraw ow unrepresentableChar
+                 loop ir' ow'
 
        -- lambda-lifted, to avoid thunks being built in the inner-loop:
        done !ir !ow = return (if ir == iw then input{ bufL=0, bufR=0 }

@@ -20,6 +20,8 @@ module GHC.IO.Encoding.Types (
     TextEncoding(..),
     TextEncoder, TextDecoder,
     EncodeBuffer, DecodeBuffer,
+    CodingFailureMode(..), codingFailureModeSuffix,
+    unrepresentableChar, unrepresentableByte
   ) where
 
 import GHC.Base
@@ -97,3 +99,28 @@ data TextEncoding
 instance Show TextEncoding where
   -- | Returns the value of 'textEncodingName'
   show te = textEncodingName te
+
+-- | The 'CodingFailureMode' is used to construct 'TextEncoding's, and specifies
+-- how they handle illegal sequences.
+data CodingFailureMode = ErrorOnCodingFailure         -- ^ Throw an error when an illegal sequence is encountered
+                       | IgnoreCodingFailure          -- ^ Attempt to ignore and recover if an illegal sequence is encountered
+                       | TransliterateCodingFailure   -- ^ Replace with the closest visual match upon an illegal sequence
+                       deriving (Show)
+
+codingFailureModeSuffix :: CodingFailureMode -> String
+codingFailureModeSuffix ErrorOnCodingFailure       = ""
+codingFailureModeSuffix IgnoreCodingFailure        = "//IGNORE"
+codingFailureModeSuffix TransliterateCodingFailure = "//TRANSLIT"
+
+-- | In transliterate mode, we use this character when decoding unknown bytes.
+--
+-- This is the defined Unicode replacement character: <http://www.fileformat.info/info/unicode/char/0fffd/index.htm>
+unrepresentableChar :: Char
+unrepresentableChar = '\xFFFD'
+
+-- | In transliterate mode, we use this character when encoding unrepresentable characters
+--
+-- We assume that all possible encodings are ASCII-supersets, so we can always decode to the
+-- ASCII '?' character.
+unrepresentableByte :: Word8
+unrepresentableByte = 63

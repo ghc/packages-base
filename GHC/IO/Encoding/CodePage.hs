@@ -4,8 +4,8 @@ module GHC.IO.Encoding.CodePage(
 #if !defined(mingw32_HOST_OS)
  ) where
 #else
-                        codePageEncoding,
-                        localeEncoding
+                        codePageEncoding, codePageEncodingFailingWith,
+                        localeEncoding, localeEncodingFailingWith
                             ) where
 
 import GHC.Base
@@ -23,10 +23,10 @@ import Data.List (lookup)
 
 import GHC.IO.Encoding.CodePage.Table
 
-import GHC.IO.Encoding.Latin1 (latin1)
-import GHC.IO.Encoding.UTF8 (utf8)
-import GHC.IO.Encoding.UTF16 (utf16le, utf16be)
-import GHC.IO.Encoding.UTF32 (utf32le, utf32be)
+import GHC.IO.Encoding.Latin1 (latin1FailingWith)
+import GHC.IO.Encoding.UTF8 (utf8FailingWith)
+import GHC.IO.Encoding.UTF16 (utf16leFailingWith, utf16beFailingWith)
+import GHC.IO.Encoding.UTF32 (utf32leFailingWith, utf32beFailingWith)
 
 -- note CodePage = UInt which might not work on Win64.  But the Win32 package
 -- also has this issue.
@@ -44,26 +44,34 @@ foreign import stdcall unsafe "windows.h GetConsoleCP"
 foreign import stdcall unsafe "windows.h GetACP"
     getACP :: IO Word32
 
-{-# NOINLINE localeEncoding #-}
+{-# NOINLINE currentCodePage #-}
+currentCodePage :: Word32
+currentCodePage = unsafePerformIO getCurrentCodePage
+
 localeEncoding :: TextEncoding
-localeEncoding = unsafePerformIO $ fmap codePageEncoding getCurrentCodePage
-    
+localeEncoding = codePageEncoding currentCodePage
+
+localeEncodingFailingWith :: CodingFailureMode -> TextEncoding
+localeEncodingFailingWith = codePageEncodingFailingWith currentCodePage
 
 codePageEncoding :: Word32 -> TextEncoding
-codePageEncoding 65001 = utf8
-codePageEncoding 1200 = utf16le
-codePageEncoding 1201 = utf16be
-codePageEncoding 12000 = utf32le
-codePageEncoding 12001 = utf32be
-codePageEncoding cp = maybe latin1 (buildEncoding cp) (lookup cp codePageMap)
+codePageEncoding cp = codePageEncodingFailingWith cp ErrorOnCodingFailure
 
-buildEncoding :: Word32 -> CodePageArrays -> TextEncoding
-buildEncoding cp SingleByteCP {decoderArray = dec, encoderArray = enc}
+codePageEncodingFailingWith :: Word32 -> CodingFailureMode -> TextEncoding
+codePageEncodingFailingWith 65001 = utf8FailingWith
+codePageEncodingFailingWith 1200 = utf16leFailingWith
+codePageEncodingFailingWith 1201 = utf16beFailingWith
+codePageEncodingFailingWith 12000 = utf32leFailingWith
+codePageEncodingFailingWith 12001 = utf32beFailingWith
+codePageEncodingFailingWith cp = maybe latin1FailingWith (buildEncoding cp) (lookup cp codePageMap)
+
+buildEncoding :: Word32 -> CodePageArrays -> CodingFailureMode -> TextEncoding
+buildEncoding cp SingleByteCP {decoderArray = dec, encoderArray = enc} cfm
   = TextEncoding {
-    textEncodingName = "CP" ++ show cp,
+    textEncodingName = "CP" ++ show cp ++ codingFailureModeSuffix cfm,
     mkTextDecoder = return $ simpleCodec
-        $ decodeFromSingleByte dec
-    , mkTextEncoder = return $ simpleCodec $ encodeToSingleByte enc
+        $ decodeFromSingleByte cfm dec
+    , mkTextEncoder = return $ simpleCodec $ encodeToSingleByte cfm enc
     }
 
 simpleCodec :: (Buffer from -> Buffer to -> IO (Buffer from, Buffer to))
@@ -71,8 +79,8 @@ simpleCodec :: (Buffer from -> Buffer to -> IO (Buffer from, Buffer to))
 simpleCodec f = BufferCodec {encode = f, close = return (), getState = return (),
                                     setState = return }
 
-decodeFromSingleByte :: ConvArray Char -> DecodeBuffer
-decodeFromSingleByte convArr
+decodeFromSingleByte :: CodingFailureMode -> ConvArray Char -> DecodeBuffer
+decodeFromSingleByte cfm convArr
     input@Buffer  { bufRaw=iraw, bufL=ir0, bufR=iw,  bufSize=_  }
     output@Buffer { bufRaw=oraw, bufL=_,   bufR=ow0, bufSize=os }
   = let
@@ -84,15 +92,22 @@ decodeFromSingleByte convArr
             | otherwise = do
                 b <- readWord8Buf iraw ir
                 let c = lookupConv convArr b
-                if c=='\0' && b /= 0 then invalid else do
+                if c=='\0' && b /= 0 then invalid (ir+1) else do
                 ow' <- writeCharBuf oraw ow c
                 loop (ir+1) ow'
           where
-            invalid = if ir > ir0 then done ir ow else ioe_decodingError
+            invalid ir' = case cfm of
+                ErrorOnCodingFailure
+                  | ir > ir0  -> done ir ow
+                  | otherwise -> ioe_decodingError
+                IgnoreCodingFailure -> loop ir' ow
+                TransliterateCodingFailure -> do
+                    ow' <- writeCharBuf oraw ow unrepresentableChar
+                    loop ir' ow'
     in loop ir0 ow0
 
-encodeToSingleByte :: CompactArray Char Word8 -> EncodeBuffer
-encodeToSingleByte CompactArray { encoderMax = maxChar,
+encodeToSingleByte :: CodingFailureMode -> CompactArray Char Word8 -> EncodeBuffer
+encodeToSingleByte cfm CompactArray { encoderMax = maxChar,
                          encoderIndices = indices,
                          encoderValues = values }
     input@Buffer{ bufRaw=iraw, bufL=ir0, bufR=iw, bufSize=_ }
@@ -106,13 +121,20 @@ encodeToSingleByte CompactArray { encoderMax = maxChar,
             | otherwise = do
                 (c,ir') <- readCharBuf iraw ir
                 case lookupCompact maxChar indices values c of
-                    Nothing -> invalid
-                    Just 0 | c /= '\0' -> invalid
+                    Nothing -> invalid ir'
+                    Just 0 | c /= '\0' -> invalid ir'
                     Just b -> do
                         writeWord8Buf oraw ow b
                         loop ir' (ow+1)
             where
-                invalid = if ir > ir0 then done ir ow else ioe_encodingError
+                invalid ir' = case cfm of
+                    ErrorOnCodingFailure
+                      | ir > ir0  -> done ir ow
+                      | otherwise -> ioe_encodingError
+                    IgnoreCodingFailure -> loop ir' ow
+                    TransliterateCodingFailure -> do
+                        writeWord8Buf oraw ow unrepresentableByte
+                        loop ir' (ow+1)
     in
     loop ir0 ow0
 

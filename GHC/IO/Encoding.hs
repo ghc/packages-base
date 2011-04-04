@@ -21,7 +21,7 @@ module GHC.IO.Encoding (
   utf8, utf8_bom,
   utf16, utf16le, utf16be,
   utf32, utf32le, utf32be, 
-  localeEncoding,
+  localeEncoding, localeEncoding_ignore,
   mkTextEncoding,
   ) where
 
@@ -97,11 +97,17 @@ utf32be  :: TextEncoding
 utf32be = UTF32.utf32be
 
 -- | The Unicode encoding of the current locale
-localeEncoding  :: TextEncoding
+localeEncoding :: TextEncoding
+
+-- | The Unicode encoding of the current locale, ignoring coding errors
+localeEncoding_ignore :: TextEncoding
+
 #if !defined(mingw32_HOST_OS)
 localeEncoding = Iconv.localeEncoding
+localeEncoding_ignore = Iconv.localeEncoding_ignore
 #else
 localeEncoding = CodePage.localeEncoding
+localeEncoding_ignore = CodePage.localeEncoding_ignore
 #endif
 
 -- | Look up the named Unicode encoding.  May fail with 
@@ -134,18 +140,27 @@ mkTextEncoding :: String -> IO TextEncoding
 #if !defined(mingw32_HOST_OS)
 mkTextEncoding = Iconv.mkTextEncoding
 #else
-mkTextEncoding "UTF-8"    = return utf8
-mkTextEncoding "UTF-16"   = return utf16
-mkTextEncoding "UTF-16LE" = return utf16le
-mkTextEncoding "UTF-16BE" = return utf16be
-mkTextEncoding "UTF-32"   = return utf32
-mkTextEncoding "UTF-32LE" = return utf32le
-mkTextEncoding "UTF-32BE" = return utf32be
-mkTextEncoding ('C':'P':n)
-    | [(cp,"")] <- reads n = return $ CodePage.codePageEncoding cp
-mkTextEncoding e = ioException
-     (IOError Nothing NoSuchThing "mkTextEncoding"
-          ("unknown encoding:" ++ e)  Nothing Nothing)
+mkTextEncoding e = case (mb_coding_failure_mode, e) of
+    (Just cfm, "UTF-8"    -> return $ UTF8.utf8FailingWith cfm
+    (Just cfm, "UTF-16"   -> return $ UTF16.utf16FailingWith cfm
+    (Just cfm, "UTF-16LE" -> return $ UTF16.utf16leFailingWith cfm
+    (Just cfm, "UTF-16BE" -> return $ UTF16.utf16beFailingWith cfm
+    (Just cfm, "UTF-32"   -> return $ UTF32.utf32FailingWith cfm
+    (Just cfm, "UTF-32LE" -> return $ UTF32.utf32leFailingWith cfm
+    (Just cfm, "UTF-32BE" -> return $ UTF32.utf32beFailingWith cfm
+    (Just cfm, 'C':'P':n)
+        | [(cp,"")] <- reads n = return $ CodePage.codePageEncodingFailingWith cp cfm
+    _ -> ioException (IOError Nothing NoSuchThing "mkTextEncoding"
+                              ("unknown encoding:" ++ e)  Nothing Nothing)
+  where
+    -- The only problem with actually documenting //IGNORE as a supported suffix
+    -- is that it's not necessarily supported with non-GNU iconv
+    (enc, suffix) = span (/= '/') e
+    mb_coding_failure_mode = case suffix of
+        ""           -> Just ErrorOnCodingFailure
+        "//IGNORE"   -> Just IgnoreCodingFailure
+        "//TRANSLIT" -> Just TransliterateCodingFailure
+        _            -> Nothing
 #endif
 
 latin1_encode :: CharBuffer -> Buffer Word8 -> IO (CharBuffer, Buffer Word8)
