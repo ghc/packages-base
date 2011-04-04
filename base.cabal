@@ -102,6 +102,7 @@ Library {
         if os(windows)
             exposed-modules: GHC.IO.Encoding.CodePage.Table
                              GHC.Conc.Windows
+                             GHC.Windows
     }
     exposed-modules:
         Control.Applicative,

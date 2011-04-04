@@ -40,6 +40,9 @@ import Control.Monad
 import GHC.IO.Exception
 import GHC.IO.Encoding (fileSystemEncoding)
 import qualified GHC.Foreign as GHC
+#ifdef mingw32_HOST_OS
+import GHC.Windows
+#endif
 #endif
 
 #ifdef __HUGS__
@@ -109,7 +112,7 @@ unpackProgName argv = do
 
    isPathSeparator :: Char -> Bool
    isPathSeparator '/'  = True
-#ifdef mingw32_HOST_OS 
+#ifdef mingw32_HOST_OS
    isPathSeparator '\\' = True
 #endif
    isPathSeparator _    = False
@@ -124,14 +127,29 @@ unpackProgName argv = do
 --    does not exist.
 
 getEnv :: String -> IO String
+#ifdef mingw32_HOST_OS
+getEnv name = withCWString name $ \s -> do
+    size <- c_GetEnvironmentVariable s nullPtr 0
+    try_size size
+  where
+    try_size size = allocaArray size $ \p_value -> do
+      res <- c_GetEnvironmentVariable s p_value size
+      case res of
+        0 -> throwGetLastError "getEnv"
+        _ | res > size -> try_size res -- Rare: size increased between calls to GetEnvironmentVariable
+          | otherwise  -> peekCWString size
+
+foreign import stdcall unsafe "windows.h GetEnvironmentVariableW"
+  c_GetEnvironmentVariable :: LPTSTR -> LPTSTR -> DWORD -> IO LPTSTR
+#else
 getEnv name =
-    -- FIXME: should use GetEnvironmentVariableW on Windows instead
     withCString name $ \s -> do
       litstring <- c_getenv s
       if litstring /= nullPtr
         then GHC.peekCString fileSystemEncoding litstring
         else ioException (IOError Nothing NoSuchThing "getEnv"
                           "no environment variable" Nothing (Just name))
+#endif
 
 foreign import ccall unsafe "getenv"
    c_getenv :: CString -> IO (Ptr CChar)
@@ -174,7 +192,7 @@ freeArgv argv = do
 
 setArgs :: [String] -> IO (Ptr CString)
 setArgs argv = do
-  -- FIXME: should iterate SetEnvironmentVariable on Windows instead
+  -- FIXME: do something else on Windows instead...
   vs <- mapM (GHC.newCString fileSystemEncoding) argv >>= newArray0 nullPtr
   setArgsPrim (genericLength argv) vs
   return vs
@@ -187,20 +205,53 @@ foreign import ccall unsafe "setProgArgv"
 --
 -- If an environment entry does not contain an @\'=\'@ character,
 -- the @key@ is the whole entry and the @value@ is the empty string.
-
 getEnvironment :: IO [(String, String)]
+
+#ifdef mingw32_HOST_OS
+getEnvironment = bracket c_GetEnvironmentStrings c_FreeEnvironmentStrings $ \pBlock ->
+    if pBlock == nullPtr then return []
+     else go pBlock
+  where
+    go pBlock = do
+        -- The block is terminated by a null byte where there
+        -- should be an environment variable of the form X=Y
+        c <- peek pBlock
+        if c == 0 then return []
+         else do
+          -- Seek the next pair (or terminating null):
+          pBlock' <- seekNull pBlock False
+          -- We now know the length in bytes, but ignore it when
+          -- getting the actual String:
+          str <- peekCWString pBlock
+          fmap (divvy str :) $ go pBlock'
+    
+    -- Returns pointer to the byte *after* the next null
+    seekNull pBlock done = do
+        let pBlock' = pBlock `plusPtr` sizeOf (undefined :: CWchar)
+        if done then return pBlock'
+         else do
+           c <- peek pBlock'
+           seekNull pBlock' (c == 0)
+
+foreign import stdcall unsafe "windows.h GetEnvironmentStringsW"
+  c_GetEnvironmentStrings :: IO (Ptr CWchar)
+
+foreign import stdcall unsafe "windows.h FreeEnvironmentStringsW"
+  c_FreeEnvironmentStrings :: Ptr CWchar -> IO Bool
+#else
 getEnvironment = do
-   -- FIXME: we should use GetEnvironmentStringsW on Windows instead
    pBlock <- getEnvBlock
    if pBlock == nullPtr then return []
     else do
       stuff <- peekArray0 nullPtr pBlock >>= mapM (GHC.peekCString fileSystemEncoding)
       return (map divvy stuff)
-  where
-   divvy str =
-      case break (=='=') str of
-        (xs,[])        -> (xs,[]) -- don't barf (like Posix.getEnvironment)
-        (name,_:value) -> (name,value)
+#endif
+
+divvy :: String -> (String, String)
+divvy str =
+  case break (=='=') str of
+    (xs,[])        -> (xs,[]) -- don't barf (like Posix.getEnvironment)
+    (name,_:value) -> (name,value)
 
 foreign import ccall unsafe "__hscore_environ" 
   getEnvBlock :: IO (Ptr CString)
