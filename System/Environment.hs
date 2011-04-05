@@ -203,6 +203,13 @@ withProgName nm act = do
 -- the duration of an action.
 
 withArgv :: [String] -> IO a -> IO a
+
+#ifdef mingw32_HOST_OS
+withArgv new_args act = bracket (setArgs new_args) setArgs (\_ -> act)
+
+setArgs :: [String] -> IO [String]
+setArgs argv = atomicModifyIORef argsRef $ \old_argv -> (argv, old_argv)
+#else
 withArgv new_args act = do
   pName <- System.Environment.getProgName
   existing_args <- System.Environment.getArgs
@@ -218,10 +225,6 @@ freeArgv argv = do
   free argv
 
 setArgs :: [String] -> IO (Ptr CString)
-
-#ifdef mingw32_HOST_OS
-setArgs argv = atomicModifyIORef argsRef $ \_ -> (argv, ())
-#else
 setArgs argv = do
   vs <- mapM (GHC.newCString fileSystemEncoding) argv >>= newArray0 nullPtr
   setArgsPrim (genericLength argv) vs

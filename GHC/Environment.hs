@@ -1,4 +1,4 @@
-{-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE CPP, ForeignFunctionInterface #-}
 
 module GHC.Environment (getFullArgs) where
 
@@ -11,6 +11,7 @@ import GHC.IO.Encoding
 import qualified GHC.Foreign as GHC
 
 #ifdef mingw32_HOST_OS
+import GHC.IO (finally)
 import GHC.Windows
 
 -- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
@@ -30,10 +31,10 @@ foreign import stdcall unsafe "windows.h GetCommandLineW"
     c_GetCommandLine :: IO (Ptr CWString)
 
 foreign import stdcall unsafe "windows.h CommandLineToArgvW"
-    c_CommandLineToArgv :: Ptr CWString -> Ptr CInt -> IO (Ptr (Ptr CWString))
+    c_CommandLineToArgv :: Ptr CWString -> Ptr CInt -> IO (Ptr CWString)
 
 foreign import stdcall unsafe "Windows.h LocalFree"
-    c_LocalFree :: Ptr a -> Ptr a
+    c_LocalFree :: Ptr a -> IO (Ptr a)
 #else
 getFullArgs :: IO [String]
 getFullArgs =
