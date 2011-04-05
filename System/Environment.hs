@@ -130,17 +130,17 @@ getEnv :: String -> IO String
 #ifdef mingw32_HOST_OS
 getEnv name = withCWString name $ \s -> do
     size <- c_GetEnvironmentVariable s nullPtr 0
-    try_size size
+    try_size s size
   where
-    try_size size = allocaArray size $ \p_value -> do
+    try_size s size = allocaArray (fromIntegral size) $ \p_value -> do
       res <- c_GetEnvironmentVariable s p_value size
       case res of
         0 -> throwGetLastError "getEnv"
-        _ | res > size -> try_size res -- Rare: size increased between calls to GetEnvironmentVariable
-          | otherwise  -> peekCWString size
+        _ | res > size -> try_size s res -- Rare: size increased between calls to GetEnvironmentVariable
+          | otherwise  -> peekCWString p_value
 
 foreign import stdcall unsafe "windows.h GetEnvironmentVariableW"
-  c_GetEnvironmentVariable :: LPTSTR -> LPTSTR -> DWORD -> IO LPTSTR
+  c_GetEnvironmentVariable :: LPTSTR -> LPTSTR -> DWORD -> IO DWORD
 #else
 getEnv name =
     withCString name $ \s -> do
@@ -231,7 +231,7 @@ getEnvironment = bracket c_GetEnvironmentStrings c_FreeEnvironmentStrings $ \pBl
         if done then return pBlock'
          else do
            c <- peek pBlock'
-           seekNull pBlock' (c == 0)
+           seekNull pBlock' (c == (0 :: Word8 ))
 
 foreign import stdcall unsafe "windows.h GetEnvironmentStringsW"
   c_GetEnvironmentStrings :: IO (Ptr CWchar)

@@ -125,7 +125,7 @@ encodeToSingleByte cfm CompactArray { encoderMax = maxChar,
             | otherwise = do
                 (c,ir') <- readCharBuf iraw ir
                 case lookupCompact maxChar indices values c of
-                    Nothing -> invalid ir'
+                    Nothing -> invalid c ir'
                     Just 0 | c /= '\0' -> invalid c ir'
                     Just b -> do
                         writeWord8Buf oraw ow b

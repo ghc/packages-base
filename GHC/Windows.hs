@@ -1,3 +1,4 @@
+{-# LANGUAGE NoImplicitPrelude, ForeignFunctionInterface #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  GHC.Windows
@@ -18,7 +19,12 @@
 
 module GHC.Windows where
 
+import GHC.Base
+import GHC.Ptr
+
 import Data.Word
+
+import Foreign.C.Error (throwErrno)
 import Foreign.C.Types
 
 
