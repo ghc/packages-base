@@ -41,7 +41,10 @@ import GHC.IO.Exception
 import GHC.IO.Encoding (fileSystemEncoding)
 import qualified GHC.Foreign as GHC
 #ifdef mingw32_HOST_OS
+import GHC.Environment
 import GHC.Windows
+import Data.IORef
+import System.IO.Unsafe
 #endif
 #endif
 
@@ -57,26 +60,46 @@ import System
   )
 #endif
 
+#ifdef __GLASGOW_HASKELL__
 -- ---------------------------------------------------------------------------
 -- getArgs, getProgName, getEnv
 
+#ifdef mingw32_HOST_OS
+
+{-# NOINLINE argsRef #-}
+argsRef :: IORef [String]
+argsRef = unsafePerformIO $ do
+    -- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
+    init_args <- fmap (dropRTSArgs . drop 1) getFullArgs
+    newIORef init_args
+
+dropRTSArgs :: [String] -> [String]
+dropRTSArgs []             = []
+dropRTSArgs ("+RTS":rest)  = dropRTSArgs (dropWhile (/= "-RTS") rest)
+dropRTSArgs ("--RTS":rest) = rest
+dropRTSArgs ("-RTS":rest)  = dropRTSArgs rest
+dropRTSArgs (arg:rest)     = arg : dropRTSArgs rest
+
+#endif
+
 -- | Computation 'getArgs' returns a list of the program's command
 -- line arguments (not including the program name).
-
-#ifdef __GLASGOW_HASKELL__
 getArgs :: IO [String]
+
+#ifdef mingw32_HOST_OS
+getArgs = readIORef argsRef
+#else
 getArgs =
   alloca $ \ p_argc ->
   alloca $ \ p_argv -> do
    getProgArgv p_argc p_argv
    p    <- fromIntegral `liftM` peek p_argc
    argv <- peek p_argv
-   -- FIXME: we should use GetCommandLineW on Windows instead
    peekArray (p - 1) (advancePtr argv 1) >>= mapM (GHC.peekCString fileSystemEncoding)
-
 
 foreign import ccall unsafe "getProgArgv"
   getProgArgv :: Ptr CInt -> Ptr (Ptr CString) -> IO ()
+#endif
 
 {-|
 Computation 'getProgName' returns the name of the program as it was
@@ -89,6 +112,10 @@ between platforms: on Windows, for example, a program invoked as foo
 is probably really @FOO.EXE@, and that is what 'getProgName' will return.
 -}
 getProgName :: IO String
+#ifdef mingw32_HOST_OS
+-- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
+getProgName = fmap (basename . head) getFullArgs
+#else
 getProgName =
   alloca $ \ p_argc ->
   alloca $ \ p_argv -> do
@@ -98,24 +125,24 @@ getProgName =
 
 unpackProgName  :: Ptr (Ptr CChar) -> IO String   -- argv[0]
 unpackProgName argv = do
-  -- FIXME: we should use GetCommandLineW on Windows instead
   s <- peekElemOff argv 0 >>= GHC.peekCString fileSystemEncoding
   return (basename s)
-  where
-   basename :: String -> String
-   basename f = go f f
-    where
-      go acc [] = acc
-      go acc (x:xs)
-        | isPathSeparator x = go xs xs
-        | otherwise         = go acc xs
-
-   isPathSeparator :: Char -> Bool
-   isPathSeparator '/'  = True
-#ifdef mingw32_HOST_OS
-   isPathSeparator '\\' = True
 #endif
-   isPathSeparator _    = False
+
+basename :: FilePath -> FilePath
+basename f = go f f
+ where
+  go acc [] = acc
+  go acc (x:xs)
+    | isPathSeparator x = go xs xs
+    | otherwise         = go acc xs
+
+  isPathSeparator :: Char -> Bool
+  isPathSeparator '/'  = True
+#ifdef mingw32_HOST_OS
+  isPathSeparator '\\' = True
+#endif
+  isPathSeparator _    = False
 
 
 -- | Computation 'getEnv' @var@ returns the value
@@ -191,14 +218,18 @@ freeArgv argv = do
   free argv
 
 setArgs :: [String] -> IO (Ptr CString)
+
+#ifdef mingw32_HOST_OS
+setArgs argv = atomicModifyIORef argsRef $ \_ -> (argv, ())
+#else
 setArgs argv = do
-  -- FIXME: do something else on Windows instead...
   vs <- mapM (GHC.newCString fileSystemEncoding) argv >>= newArray0 nullPtr
   setArgsPrim (genericLength argv) vs
   return vs
 
 foreign import ccall unsafe "setProgArgv" 
   setArgsPrim  :: CInt -> Ptr CString -> IO ()
+#endif
 
 -- |'getEnvironment' retrieves the entire environment as a
 -- list of @(key,value)@ pairs.
