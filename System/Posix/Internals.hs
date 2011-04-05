@@ -177,13 +177,25 @@ fdGetMode fd = do
 #ifdef mingw32_HOST_OS
 withFilePath :: FilePath -> (CWString -> IO a) -> IO a
 withFilePath = withCWString
+
+peekFilePath :: CWString -> IO FilePath
+peekFilePath = peekCWString
 #else
+
 withFilePath :: FilePath -> (CString -> IO a) -> IO a
+peekFilePath :: CString -> IO FilePath
+peekFilePathLen :: CStringLen -> IO FilePath
+
 #if __GLASGOW_HASKELL__
 withFilePath = GHC.withCString fileSystemEncoding
+peekFilePath = GHC.peekCString fileSystemEncoding
+peekFilePathLen = GHC.peekCStringLen fileSystemEncoding
 #else
 withFilePath = withCString
+peekFilePath = peekCString
+peekFilePathLen = peekCStringLen
 #endif
+
 #endif
 
 -- ---------------------------------------------------------------------------
