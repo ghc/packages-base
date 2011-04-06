@@ -5,10 +5,6 @@ module GHC.Environment (getFullArgs) where
 import Prelude
 import Foreign
 import Foreign.C
-import Control.Monad
-
-import GHC.IO.Encoding
-import qualified GHC.Foreign as GHC
 
 #ifdef mingw32_HOST_OS
 import GHC.IO (finally)
@@ -36,6 +32,11 @@ foreign import stdcall unsafe "windows.h CommandLineToArgvW"
 foreign import stdcall unsafe "Windows.h LocalFree"
     c_LocalFree :: Ptr a -> IO (Ptr a)
 #else
+import Control.Monad
+
+import GHC.IO.Encoding
+import qualified GHC.Foreign as GHC
+
 getFullArgs :: IO [String]
 getFullArgs =
   alloca $ \ p_argc ->

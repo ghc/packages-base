@@ -42,7 +42,6 @@ import Control.Monad
 import Data.Bits (shiftR)
 import Data.Maybe (Maybe(..))
 import Data.Typeable
-import Foreign.C.Error (throwErrno)
 import GHC.Base
 import GHC.Conc.Sync
 import GHC.Enum (Enum)

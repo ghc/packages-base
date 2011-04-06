@@ -102,8 +102,12 @@ localeEncoding :: TextEncoding
 -- | The Unicode encoding of the current locale, but allowing arbitrary
 -- undecodable bytes to be round-tripped through it.
 --
--- This 'TextEncoding' is also used to decode command line arguments
--- and environment variables.
+-- This 'TextEncoding' is used to decode and encode command line arguments
+-- and environment variables on non-Windows platforms.
+--
+-- On Windows, this encoding *should not* be used if possible because
+-- the use of code pages is deprecated: Strings should be retrieved
+-- via the "wide" W-family of UTF-16 APIs instead
 fileSystemEncoding :: TextEncoding
 
 -- | The Unicode encoding of the current locale, but where undecodable
@@ -117,7 +121,7 @@ fileSystemEncoding = Iconv.localeEncodingFailingWith SurrogateEscapeFailure
 foreignEncoding = Iconv.localeEncodingFailingWith IgnoreCodingFailure
 #else
 localeEncoding = CodePage.localeEncoding
-fileSystemEncoding = CodePage.localeEncoding -- On Windows, this *should not* be used. Strings should be retrieved via *W APIs instead
+fileSystemEncoding = CodePage.localeEncodingFailingWith SurrogateEscapeFailure
 foreignEncoding = CodePage.localeEncodingFailingWith IgnoreCodingFailure
 #endif
 

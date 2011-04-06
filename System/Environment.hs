@@ -31,20 +31,20 @@ module System.Environment
 import Prelude
 
 #ifdef __GLASGOW_HASKELL__
-import Data.List
 import Foreign
 import Foreign.C
 import Control.Exception.Base   ( bracket )
-import Control.Monad
 -- import GHC.IO
 import GHC.IO.Exception
 import GHC.IO.Encoding (fileSystemEncoding)
 import qualified GHC.Foreign as GHC
+import Data.List
 #ifdef mingw32_HOST_OS
 import GHC.Environment
 import GHC.Windows
 import Data.IORef
-import System.IO.Unsafe
+#else
+import Control.Monad
 #endif
 #endif
 
@@ -70,7 +70,7 @@ import System
 argsRef :: IORef [String]
 argsRef = unsafePerformIO $ do
     -- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
-    init_args <- fmap (dropRTSArgs . drop 1) getFullArgs
+    init_args <- fmap dropRTSArgs getFullArgs
     newIORef init_args
 
 dropRTSArgs :: [String] -> [String]
@@ -87,7 +87,7 @@ dropRTSArgs (arg:rest)     = arg : dropRTSArgs rest
 getArgs :: IO [String]
 
 #ifdef mingw32_HOST_OS
-getArgs = readIORef argsRef
+getArgs = fmap tail (readIORef argsRef)
 #else
 getArgs =
   alloca $ \ p_argc ->
@@ -114,7 +114,7 @@ is probably really @FOO.EXE@, and that is what 'getProgName' will return.
 getProgName :: IO String
 #ifdef mingw32_HOST_OS
 -- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
-getProgName = fmap (basename . head) getFullArgs
+getProgName = fmap (basename . head) (readIORef argsRef)
 #else
 getProgName =
   alloca $ \ p_argc ->
@@ -155,16 +155,24 @@ basename f = go f f
 
 getEnv :: String -> IO String
 #ifdef mingw32_HOST_OS
-getEnv name = withCWString name $ \s -> do
-    size <- c_GetEnvironmentVariable s nullPtr 0
-    try_size s size
+getEnv name = withCWString name $ \s -> try_size s 256
   where
     try_size s size = allocaArray (fromIntegral size) $ \p_value -> do
       res <- c_GetEnvironmentVariable s p_value size
       case res of
-        0 -> throwGetLastError "getEnv"
+        0 -> do
+		  err <- c_GetLastError
+		  if err == eRROR_ENVVAR_NOT_FOUND
+		   then ioe_missingEnvVar name
+		   else throwGetLastError "getEnv"
         _ | res > size -> try_size s res -- Rare: size increased between calls to GetEnvironmentVariable
           | otherwise  -> peekCWString p_value
+
+eRROR_ENVVAR_NOT_FOUND :: DWORD
+eRROR_ENVVAR_NOT_FOUND = 203
+
+foreign import stdcall unsafe "windows.h GetLastError"
+  c_GetLastError:: IO DWORD
 
 foreign import stdcall unsafe "windows.h GetEnvironmentVariableW"
   c_GetEnvironmentVariable :: LPTSTR -> LPTSTR -> DWORD -> IO DWORD
@@ -174,12 +182,15 @@ getEnv name =
       litstring <- c_getenv s
       if litstring /= nullPtr
         then GHC.peekCString fileSystemEncoding litstring
-        else ioException (IOError Nothing NoSuchThing "getEnv"
-                          "no environment variable" Nothing (Just name))
-#endif
+        else ioe_missingEnvVar name
 
 foreign import ccall unsafe "getenv"
    c_getenv :: CString -> IO (Ptr CChar)
+#endif
+
+ioe_missingEnvVar :: String -> IO a
+ioe_missingEnvVar name = ioException (IOError Nothing NoSuchThing "getEnv"
+											  "no environment variable" Nothing (Just name))
 
 {-|
 'withArgs' @args act@ - while executing action @act@, have 'getArgs'
@@ -205,34 +216,40 @@ withProgName nm act = do
 withArgv :: [String] -> IO a -> IO a
 
 #ifdef mingw32_HOST_OS
-withArgv new_args act = bracket (setArgs new_args) setArgs (\_ -> act)
+-- We have to reflect the updated arguments in the RTS-side variables as
+-- well, because the RTS still consults them for error messages and the like.
+-- If we don't do this then ghc-e005 fails.
+withArgv new_args act = bracket (setArgs new_args) setArgs (\_ -> withProgArgv new_args act)
 
 setArgs :: [String] -> IO [String]
 setArgs argv = atomicModifyIORef argsRef $ \old_argv -> (argv, old_argv)
 #else
-withArgv new_args act = do
+withArgv = withProgArgv
+#endif
+
+withProgArgv :: [String] -> IO a -> IO a
+withProgArgv new_args act = do
   pName <- System.Environment.getProgName
   existing_args <- System.Environment.getArgs
-  bracket (setArgs new_args)
-          (\argv -> do _ <- setArgs (pName:existing_args)
-                       freeArgv argv)
+  bracket (setProgArgv new_args)
+          (\argv -> do _ <- setProgArgv (pName:existing_args)
+                       freeProgArgv argv)
           (const act)
 
-freeArgv :: Ptr CString -> IO ()
-freeArgv argv = do
+freeProgArgv :: Ptr CString -> IO ()
+freeProgArgv argv = do
   size <- lengthArray0 nullPtr argv
   sequence_ [peek (argv `advancePtr` i) >>= free | i <- [size, size-1 .. 0]]
   free argv
 
-setArgs :: [String] -> IO (Ptr CString)
-setArgs argv = do
+setProgArgv :: [String] -> IO (Ptr CString)
+setProgArgv argv = do
   vs <- mapM (GHC.newCString fileSystemEncoding) argv >>= newArray0 nullPtr
-  setArgsPrim (genericLength argv) vs
+  c_setProgArgv (genericLength argv) vs
   return vs
 
 foreign import ccall unsafe "setProgArgv" 
-  setArgsPrim  :: CInt -> Ptr CString -> IO ()
-#endif
+  c_setProgArgv  :: CInt -> Ptr CString -> IO ()
 
 -- |'getEnvironment' retrieves the entire environment as a
 -- list of @(key,value)@ pairs.
@@ -279,6 +296,9 @@ getEnvironment = do
     else do
       stuff <- peekArray0 nullPtr pBlock >>= mapM (GHC.peekCString fileSystemEncoding)
       return (map divvy stuff)
+
+foreign import ccall unsafe "__hscore_environ" 
+  getEnvBlock :: IO (Ptr CString)
 #endif
 
 divvy :: String -> (String, String)
@@ -286,7 +306,4 @@ divvy str =
   case break (=='=') str of
     (xs,[])        -> (xs,[]) -- don't barf (like Posix.getEnvironment)
     (name,_:value) -> (name,value)
-
-foreign import ccall unsafe "__hscore_environ" 
-  getEnvBlock :: IO (Ptr CString)
 #endif  /* __GLASGOW_HASKELL__ */
