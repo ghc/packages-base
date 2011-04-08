@@ -332,15 +332,22 @@ utf16be_encodeFailingWith cfm
         | otherwise = do
            (c,ir') <- readCharBuf iraw ir
            case ord c of
-             x | x < 0x10000 -> do
-                    case cfm of
-                      SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
-                        writeWord8Buf oraw ow b
-                        loop ir' (ow+1)
-                      _ -> do
-                        writeWord8Buf oraw ow     (fromIntegral (x `shiftR` 8))
-                        writeWord8Buf oraw (ow+1) (fromIntegral x)
-                        loop ir' (ow+2)
+             x | x < 0x10000 -> case encodeSurrogateCharacter c of
+                 Just b -> case cfm of
+                   SurrogateEscapeFailure -> do
+                     writeWord8Buf oraw ow b
+                     loop ir' (ow+1)
+                   IgnoreCodingFailure -> loop ir' ow
+                   TransliterateCodingFailure -> do
+                     writeWord8Buf oraw ow     0
+                     writeWord8Buf oraw (ow+1) unrepresentableByte
+                     loop ir' (ow+2)
+                   ErrorOnCodingFailure | ir > ir0  -> done ir ow
+                                        | otherwise -> ioe_encodingError
+                 Nothing -> do
+                   writeWord8Buf oraw ow     (fromIntegral (x `shiftR` 8))
+                   writeWord8Buf oraw (ow+1) (fromIntegral x)
+                   loop ir' (ow+2)
                | otherwise -> do
                     if os - ow < 4 then done ir ow else do
                     let 
@@ -376,15 +383,22 @@ utf16le_encodeFailingWith cfm
         | otherwise = do
            (c,ir') <- readCharBuf iraw ir
            case ord c of
-             x | x < 0x10000 -> do
-                    case cfm of
-                      SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
-                        writeWord8Buf oraw ow b
-                        loop ir' (ow+1)
-                      _ -> do
-                        writeWord8Buf oraw ow     (fromIntegral x)
-                        writeWord8Buf oraw (ow+1) (fromIntegral (x `shiftR` 8))
-                        loop ir' (ow+2)
+             x | x < 0x10000 -> case encodeSurrogateCharacter c of
+                 Just b -> case cfm of
+                   SurrogateEscapeFailure -> do
+                     writeWord8Buf oraw ow b
+                     loop ir' (ow+1)
+                   IgnoreCodingFailure -> loop ir' ow
+                   TransliterateCodingFailure -> do
+                     writeWord8Buf oraw ow     unrepresentableByte
+                     writeWord8Buf oraw (ow+1) 0
+                     loop ir' (ow+2)
+                   ErrorOnCodingFailure | ir > ir0  -> done ir ow
+                                        | otherwise -> ioe_encodingError
+                 Nothing -> do
+                   writeWord8Buf oraw ow     (fromIntegral x)
+                   writeWord8Buf oraw (ow+1) (fromIntegral (x `shiftR` 8))
+                   loop ir' (ow+2)
                | otherwise ->
                     if os - ow < 4 then done ir ow else do
                     let 
@@ -402,6 +416,11 @@ utf16le_encodeFailingWith cfm
                     loop ir' (ow+4)
     in
     loop ir0 ow0
+
+ioe_encodingError :: IO a
+ioe_encodingError = ioException
+     (IOError Nothing InvalidArgument "utf16_encode"
+          "surrogate bytes in input" Nothing Nothing)
 
 chr2 :: Word16 -> Word16 -> Char
 chr2 (W16# a#) (W16# b#) = C# (chr# (upper# +# lower# +# 0x10000#))

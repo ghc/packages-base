@@ -249,9 +249,7 @@ iconvRecode cfm transcribe surrogatify iconv_t input0 iscale output0 oscale = go
                       -- don't report it until the rest of the characters in
                       -- the buffer have been drained.
                   return (new_input, new_output)
-            
-                 -- Custom code to try to ignore invalid byte sequences. Not as good as just using the //IGNORE
-                 -- suffix to iconv, but we can't rely on that behaviour
+
               e -> do
                   mb_handler <- case cfm of
                       _ | e /= eINVAL, e /= eILSEQ -> return Nothing

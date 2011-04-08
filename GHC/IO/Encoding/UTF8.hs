@@ -246,11 +246,18 @@ utf8_encode cfm
                     writeWord8Buf oraw ow     c1
                     writeWord8Buf oraw (ow+1) c2
                     loop ir' (ow+2)
-               | x <= 0xFFFF -> case cfm of
-                  SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
-                    writeWord8Buf oraw ow b
-                    loop ir' (ow+1)
-                  _ -> do
+               | x <= 0xFFFF -> case encodeSurrogateCharacter c of
+                  Just b -> case cfm of
+                    SurrogateEscapeFailure -> do
+                      writeWord8Buf oraw ow b
+                      loop ir' (ow+1)
+                    IgnoreCodingFailure -> loop ir' ow
+                    TransliterateCodingFailure -> do
+                      writeWord8Buf oraw ow unrepresentableByte
+                      loop ir' (ow+1)
+                    ErrorOnCodingFailure | ir > ir0  -> done ir ow
+                                         | otherwise -> ioe_encodingError
+                  Nothing -> do
                     if os - ow < 3 then done ir ow else do
                     let (c1,c2,c3) = ord3 c
                     writeWord8Buf oraw ow     c1
@@ -267,6 +274,11 @@ utf8_encode cfm
                     loop ir' (ow+4)
    in
    loop ir0 ow0
+
+ioe_encodingError :: IO a
+ioe_encodingError = ioException
+     (IOError Nothing InvalidArgument "utf8_encode"
+          "surrogate bytes in input" Nothing Nothing)
 
 -- -----------------------------------------------------------------------------
 -- UTF-8 primitives, lifted from Data.Text.Fusion.Utf8

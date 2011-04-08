@@ -315,17 +315,27 @@ utf32be_encodeFailingWith cfm
         | os - ow < 4  =  done ir ow
         | otherwise = do
            (c,ir') <- readCharBuf iraw ir
-           case cfm of
-               SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+           case encodeSurrogateCharacter c of
+             Just b -> case cfm of
+               SurrogateEscapeFailure -> do
                  writeWord8Buf oraw ow b
                  loop ir' (ow+1)
-               _ -> do
-                 let (c0,c1,c2,c3) = ord4 c
-                 writeWord8Buf oraw ow     c0
-                 writeWord8Buf oraw (ow+1) c1
-                 writeWord8Buf oraw (ow+2) c2
-                 writeWord8Buf oraw (ow+3) c3
+               IgnoreCodingFailure -> loop ir' ow
+               TransliterateCodingFailure -> do
+                 writeWord8Buf oraw ow     0
+                 writeWord8Buf oraw (ow+1) 0
+                 writeWord8Buf oraw (ow+2) 0
+                 writeWord8Buf oraw (ow+3) unrepresentableByte
                  loop ir' (ow+4)
+               ErrorOnCodingFailure | ir > ir0  -> done ir ow
+                                    | otherwise -> ioe_encodingError
+             Nothing -> do
+               let (c0,c1,c2,c3) = ord4 c
+               writeWord8Buf oraw ow     c0
+               writeWord8Buf oraw (ow+1) c1
+               writeWord8Buf oraw (ow+2) c2
+               writeWord8Buf oraw (ow+3) c3
+               loop ir' (ow+4)
     in
     loop ir0 ow0
 
@@ -345,19 +355,34 @@ utf32le_encodeFailingWith cfm
         | os - ow < 4  =  done ir ow
         | otherwise = do
            (c,ir') <- readCharBuf iraw ir
-           case cfm of
-               SurrogateEscapeFailure | Just b <- encodeSurrogateCharacter c -> do
+           case encodeSurrogateCharacter c of
+             Just b -> case cfm of
+               SurrogateEscapeFailure -> do
                  writeWord8Buf oraw ow b
                  loop ir' (ow+1)
-               _ -> do
-                 let (c0,c1,c2,c3) = ord4 c
-                 writeWord8Buf oraw ow     c3
-                 writeWord8Buf oraw (ow+1) c2
-                 writeWord8Buf oraw (ow+2) c1
-                 writeWord8Buf oraw (ow+3) c0
+               IgnoreCodingFailure -> loop ir' ow
+               TransliterateCodingFailure -> do
+                 writeWord8Buf oraw ow     unrepresentableByte
+                 writeWord8Buf oraw (ow+1) 0
+                 writeWord8Buf oraw (ow+2) 0
+                 writeWord8Buf oraw (ow+3) 0
                  loop ir' (ow+4)
+               ErrorOnCodingFailure | ir > ir0  -> done ir ow
+                                    | otherwise -> ioe_encodingError
+             Nothing -> do
+               let (c0,c1,c2,c3) = ord4 c
+               writeWord8Buf oraw ow     c3
+               writeWord8Buf oraw (ow+1) c2
+               writeWord8Buf oraw (ow+2) c1
+               writeWord8Buf oraw (ow+3) c0
+               loop ir' (ow+4)
     in
     loop ir0 ow0
+
+ioe_encodingError :: IO a
+ioe_encodingError = ioException
+     (IOError Nothing InvalidArgument "utf32_encode"
+          "surrogate bytes in input" Nothing Nothing)
 
 chr4 :: Word8 -> Word8 -> Word8 -> Word8 -> Char
 chr4 (W8# x1#) (W8# x2#) (W8# x3#) (W8# x4#) =
