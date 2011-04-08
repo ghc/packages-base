@@ -60,12 +60,6 @@ import System.Posix.Internals
 import Foreign.C
 import GHC.Show
 import GHC.Ptr
-
-puts :: String -> IO ()
- -- In reality should be withCString, but assume ASCII to avoid possible loop
-puts s = do withCAStringLen (s++"\n") $ \(p,len) ->
-                c_write 1 (castPtr p) (fromIntegral len)
-            return ()
 #endif
 
 -- -----------------------------------------------------------------------------

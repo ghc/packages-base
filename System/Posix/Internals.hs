@@ -70,6 +70,18 @@ import DIOError
 {-# CFILES cbits/PrelIOUtils.c cbits/consUtils.c #-}
 #endif
 
+
+-- ---------------------------------------------------------------------------
+-- Debugging the base package
+
+puts :: String -> IO ()
+puts s = withCAStringLen (s ++ "\n") $ \(p, len) -> do
+            -- In reality should be withCString, but assume ASCII to avoid loop
+            -- if this is called by GHC.Foreign
+           _ <- c_write 1 (castPtr p) (fromIntegral len)
+           return ()
+
+
 -- ---------------------------------------------------------------------------
 -- Types
 

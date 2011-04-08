@@ -58,12 +58,6 @@ iconv_trace s
  | c_DEBUG_DUMP = puts s
  | otherwise    = return ()
 
-puts :: String -> IO ()
-puts s = do _ <- withCAStringLen (s ++ "\n") $ \(p, len) ->
-                      -- In reality should be withCString, but assume ASCII to avoid loop
-                     c_write 1 (castPtr p) (fromIntegral len)
-            return ()
-
 -- -----------------------------------------------------------------------------
 -- iconv encoders/decoders
 

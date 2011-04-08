@@ -23,7 +23,6 @@
 -----------------------------------------------------------------------------
 
 module Foreign.C.String (   -- representation of strings in C
-
   -- * C strings
 
   CString,           -- = Ptr CChar
@@ -108,9 +107,6 @@ import Foreign.Storable
 import Data.Word
 
 #ifdef __GLASGOW_HASKELL__
-import qualified GHC.Foreign as GHC
-
--- Imports for the locale-encoding version of marshallers
 import Control.Monad
 
 import GHC.List
@@ -119,6 +115,7 @@ import GHC.Num
 import GHC.Base
 
 import {-# SOURCE #-} GHC.IO.Encoding
+import qualified GHC.Foreign as GHC
 #else
 import Data.Char ( chr, ord )
 #define unsafeChr chr
@@ -229,8 +226,8 @@ withCStringLen = GHC.withCStringLen foreignEncoding
 charIsRepresentable :: Char -> IO Bool
 charIsRepresentable c = return (ord c < 256)
 #else
--- | Determines whether a character can be accurately encoded in a 'CString'.
--- Unrepresentable characters are converted to '?' or their nearest visual equivalent.
+-- -- | Determines whether a character can be accurately encoded in a 'CString'.
+-- -- Unrepresentable characters are converted to '?' or their nearest visual equivalent.
 charIsRepresentable :: Char -> IO Bool
 charIsRepresentable = GHC.charIsRepresentable localeEncoding -- NOT foreignEncoding because that ignores failure
 #endif

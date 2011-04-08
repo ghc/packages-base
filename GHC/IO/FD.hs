@@ -660,8 +660,3 @@ foreign import ccall unsafe "lockFile"
 foreign import ccall unsafe "unlockFile"
   unlockFile :: CInt -> IO CInt
 #endif
-
-puts :: String -> IO ()
-puts s = do _ <- withCStringLen s $ \(p,len) ->
-                     c_write 1 (castPtr p) (fromIntegral len)
-            return ()
