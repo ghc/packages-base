@@ -167,7 +167,7 @@ utf16be_EF cfm =
           })
 
 utf16le :: TextEncoding
-utf16le = mkUTF16be ErrorOnCodingFailure
+utf16le = mkUTF16le ErrorOnCodingFailure
 
 mkUTF16le :: CodingFailureMode -> TextEncoding
 mkUTF16le cfm = TextEncoding { textEncodingName = "UTF16-LE",
