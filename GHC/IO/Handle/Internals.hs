@@ -380,11 +380,12 @@ streamEncode codec from to = go (from, to)
   where 
     go (from, to) = do
       (why, from', to') <- encode codec from to
-      -- When we are dealing with Streams
+      -- When we are dealing with Handles, we don't care about input/output
+      -- underflow particularly, and we want to delay errors about invalid
+      -- sequences as far as possible.
       case why of
-        Encoding.InvalidSequence -> recover codec from to >>= go
-        Encoding.OutputUnderflow -> return (from', to')
-        Encoding.InputUnderflow  -> return (from', to')
+        Encoding.InvalidSequence | bufL from == bufL from' -> recover codec from' to' >>= go
+        _ -> return (from', to')
 
 -- -----------------------------------------------------------------------------
 -- Handle Finalizers
