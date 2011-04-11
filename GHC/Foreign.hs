@@ -138,14 +138,11 @@ withCStringLen enc = withEncodedCString enc False
 
 -- | Determines whether a character can be accurately encoded in a 'CString'.
 --
--- For this to work properly, the supplied 'TextEncoding' must throw an
--- IOException upon encountering an invalid sequence.
---
 -- Pretty much anyone who uses this function is in a state of sin because
 -- whether or not a character is encodable will, in general, depend on the
 -- context in which it occurs.
 charIsRepresentable :: TextEncoding -> Char -> IO Bool
-charIsRepresentable enc c = withEncodedCString enc False [c] (\_ -> return True) `catchException` (\e -> let _ = e :: IOException in return False)
+charIsRepresentable enc c = withCString enc [c] (fmap (== [c]) . peekCString enc) `catchException` (\e -> let _ = e :: IOException in return False)
 
 -- auxiliary definitions
 -- ----------------------

@@ -229,7 +229,7 @@ charIsRepresentable c = return (ord c < 256)
 -- -- | Determines whether a character can be accurately encoded in a 'CString'.
 -- -- Unrepresentable characters are converted to '?' or their nearest visual equivalent.
 charIsRepresentable :: Char -> IO Bool
-charIsRepresentable = GHC.charIsRepresentable localeEncoding -- NOT foreignEncoding because that ignores failure
+charIsRepresentable = GHC.charIsRepresentable foreignEncoding
 #endif
 
 -- single byte characters
