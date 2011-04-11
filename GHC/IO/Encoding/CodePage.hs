@@ -17,7 +17,6 @@ import GHC.IO (unsafePerformIO)
 import GHC.IO.Encoding.Failure
 import GHC.IO.Encoding.Types
 import GHC.IO.Buffer
-import GHC.IO.Exception
 import Data.Bits
 import Data.Maybe
 import Data.List (lookup)
@@ -53,7 +52,7 @@ localeEncoding :: TextEncoding
 localeEncoding = mkLocaleEncoding ErrorOnCodingFailure
 
 mkLocaleEncoding :: CodingFailureMode -> TextEncoding
-mkLocaleEncoding = mkCodePageEncoding currentCodePage
+mkLocaleEncoding cfm = mkCodePageEncoding cfm currentCodePage
 
 
 codePageEncoding :: Word32 -> TextEncoding

@@ -163,7 +163,7 @@ mkTextEncoding e = case mb_coding_failure_mode of
     "UTF-32LE" -> return $ UTF32.mkUTF32le cfm
     "UTF-32BE" -> return $ UTF32.mkUTF32be cfm
 #if defined(mingw32_HOST_OS)
-    'C':'P':n | [(cp,"")] <- reads n -> return $ CodePage.mkCodePageEncoding cp cfm
+    'C':'P':n | [(cp,"")] <- reads n -> return $ CodePage.mkCodePageEncoding cfm cp
     _ -> unknown_encoding
 #else
     _ -> Iconv.mkIconvEncoding cfm enc
