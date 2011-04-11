@@ -16,7 +16,7 @@
 -----------------------------------------------------------------------------
 
 module GHC.IO.Encoding (
-  BufferCodec(..), TextEncoding(..), TextEncoder, TextDecoder,
+  BufferCodec(..), TextEncoding(..), TextEncoder, TextDecoder, CodingProgress(..),
   latin1, latin1_encode, latin1_decode,
   utf8, utf8_bom,
   utf16, utf16le, utf16be,
@@ -117,12 +117,12 @@ foreignEncoding :: TextEncoding
 
 #if !defined(mingw32_HOST_OS)
 localeEncoding = Iconv.localeEncoding
-fileSystemEncoding = Iconv.localeEncodingFailingWith SurrogateEscapeFailure
-foreignEncoding = Iconv.localeEncodingFailingWith IgnoreCodingFailure
+fileSystemEncoding = Iconv.mkLocaleEncoding SurrogateEscapeFailure
+foreignEncoding = Iconv.mkLocaleEncoding IgnoreCodingFailure
 #else
 localeEncoding = CodePage.localeEncoding
-fileSystemEncoding = CodePage.localeEncodingFailingWith SurrogateEscapeFailure
-foreignEncoding = CodePage.localeEncodingFailingWith IgnoreCodingFailure
+fileSystemEncoding = CodePage.mkLocaleEncoding SurrogateEscapeFailure
+foreignEncoding = CodePage.mkLocaleEncoding IgnoreCodingFailure
 #endif
 
 -- | Look up the named Unicode encoding.  May fail with 
@@ -155,18 +155,18 @@ mkTextEncoding :: String -> IO TextEncoding
 mkTextEncoding e = case mb_coding_failure_mode of
   Nothing -> unknown_encoding
   Just cfm -> case enc of
-    "UTF-8"    -> return $ UTF8.utf8FailingWith cfm
-    "UTF-16"   -> return $ UTF16.utf16FailingWith cfm
-    "UTF-16LE" -> return $ UTF16.utf16leFailingWith cfm
-    "UTF-16BE" -> return $ UTF16.utf16beFailingWith cfm
-    "UTF-32"   -> return $ UTF32.utf32FailingWith cfm
-    "UTF-32LE" -> return $ UTF32.utf32leFailingWith cfm
-    "UTF-32BE" -> return $ UTF32.utf32beFailingWith cfm
+    "UTF-8"    -> return $ UTF8.mkUTF8 cfm
+    "UTF-16"   -> return $ UTF16.mkUTF16 cfm
+    "UTF-16LE" -> return $ UTF16.mkUTF16le cfm
+    "UTF-16BE" -> return $ UTF16.mkUTF16be cfm
+    "UTF-32"   -> return $ UTF32.mkUTF32 cfm
+    "UTF-32LE" -> return $ UTF32.mkUTF32le cfm
+    "UTF-32BE" -> return $ UTF32.mkUTF32be cfm
 #if defined(mingw32_HOST_OS)
-    'C':'P':n | [(cp,"")] <- reads n -> return $ CodePage.codePageEncodingFailingWith cp cfm
+    'C':'P':n | [(cp,"")] <- reads n -> return $ CodePage.mkCodePageEncoding cp cfm
     _ -> unknown_encoding
 #else
-    _ -> Iconv.mkTextEncoding e
+    _ -> Iconv.mkIconvEncoding cfm enc
 #endif
   where
     -- The only problem with actually documenting //IGNORE and //TRANSLIT as
@@ -183,9 +183,9 @@ mkTextEncoding e = case mb_coding_failure_mode of
                                             ("unknown encoding:" ++ e)  Nothing Nothing)
 
 latin1_encode :: CharBuffer -> Buffer Word8 -> IO (CharBuffer, Buffer Word8)
-latin1_encode = Latin1.latin1_encode -- unchecked, used for binary
+latin1_encode input output = fmap (\(_why,input',output') -> (input',output')) $ Latin1.latin1_encode input output -- unchecked, used for binary
 --latin1_encode = unsafePerformIO $ do mkTextEncoder Iconv.latin1 >>= return.encode
 
 latin1_decode :: Buffer Word8 -> CharBuffer -> IO (Buffer Word8, CharBuffer)
-latin1_decode = Latin1.latin1_decode
+latin1_decode input output = fmap (\(_why,input',output') -> (input',output')) $ Latin1.latin1_decode input output
 --latin1_decode = unsafePerformIO $ do mkTextDecoder Iconv.latin1 >>= return.encode

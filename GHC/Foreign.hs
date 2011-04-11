@@ -167,12 +167,21 @@ peekEncodedCString (TextEncoding { mkTextDecoder = mk_decoder }) (p, sz_bytes)
       to <- newCharBuffer cHUNK_SIZE WriteBuffer
 
       let go iteration from = do
-            putDebugMsg ("peekEncodedCString: " ++ show iteration)
-            (from', to') <- encode decoder from to
-            to_chars <- withBuffer to' $ peekArray (bufferElems to')
+            (why, from', to') <- encode decoder from to
             if isEmptyBuffer from'
-             then return to_chars
-             else fmap (to_chars++) $ go (iteration + 1) from'
+             then
+              -- No input remaining: @why@ will be InputUnderflow, but we don't care
+              withBuffer to' $ peekArray (bufferElems to')
+             else do
+              -- Input remaining: what went wrong?
+              putDebugMsg ("peekEncodedCString: " ++ show iteration ++ " " ++ show why)
+              (from'', to'') <- case why of InvalidSequence -> recover decoder from' to' -- These conditions are equally bad because
+                                            InputUnderflow  -> recover decoder from' to' -- they indicate malformed/truncated input
+                                            OutputUnderflow -> return (from', to')       -- We will have more space next time round
+              putDebugMsg ("peekEncodedCString: from " ++ summaryBuffer from ++ " " ++ summaryBuffer from' ++ " " ++ summaryBuffer from'')
+              putDebugMsg ("peekEncodedCString: to " ++ summaryBuffer to ++ " " ++ summaryBuffer to' ++ " " ++ summaryBuffer to'')
+              to_chars <- withBuffer to'' $ peekArray (bufferElems to'')
+              fmap (to_chars++) $ go (iteration + 1) from''
 
       go (0 :: Int) from0
 
@@ -224,14 +233,23 @@ newEncodedCString (TextEncoding { mkTextEncoder = mk_encoder }) null_terminate s
 
 tryFillBufferAndCall :: TextEncoder dstate -> Bool -> Buffer Char -> Ptr Word8 -> Int
                      -> (CStringLen -> IO a) -> IO (Maybe a)
-tryFillBufferAndCall encoder null_terminate from to_p to_sz_bytes act = do
+tryFillBufferAndCall encoder null_terminate from0 to_p to_sz_bytes act = do
     to_fp <- newForeignPtr_ to_p
-    let to = emptyBuffer to_fp to_sz_bytes WriteBuffer
-    (from', to') <- encode encoder from to
-    if isEmptyBuffer from' && (not null_terminate || (bufferAvailable to' > 0))
-     then do
-         let bytes = bufferElems to'
-         withBuffer to' $ \to_ptr -> do
-             when null_terminate $ pokeElemOff to_ptr (bufR to') 0
-             fmap Just $ act (castPtr to_ptr, bytes) -- NB: the length information is specified as being in *bytes*
-     else return Nothing
+    go (0 :: Int) (from0, emptyBuffer to_fp to_sz_bytes WriteBuffer)
+  where
+    go iteration (from, to) = do
+      (why, from', to') <- encode encoder from to
+      putDebugMsg ("tryFillBufferAndCall: " ++ show iteration ++ " " ++ show why ++ " " ++ summaryBuffer from ++ " " ++ summaryBuffer from')
+      if isEmptyBuffer from'
+       then if null_terminate && bufferAvailable to' == 0
+             then return Nothing -- We had enough for the string but not the terminator: ask the caller for more buffer
+             else do
+               -- Awesome, we had enough buffer
+               let bytes = bufferElems to'
+               withBuffer to' $ \to_ptr -> do
+                   when null_terminate $ pokeElemOff to_ptr (bufR to') 0
+                   fmap Just $ act (castPtr to_ptr, bytes) -- NB: the length information is specified as being in *bytes*
+       else case why of -- We didn't consume all of the input
+              InputUnderflow  -> recover encoder from' to' >>= go (iteration + 1) -- These conditions are equally bad
+              InvalidSequence -> recover encoder from' to' >>= go (iteration + 1) -- since the input was truncated/invalid
+              OutputUnderflow -> return Nothing -- Oops, out of buffer during decoding: ask the caller for more
