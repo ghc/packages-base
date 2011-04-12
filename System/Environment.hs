@@ -42,7 +42,6 @@ import Data.List
 #ifdef mingw32_HOST_OS
 import GHC.Environment
 import GHC.Windows
-import Data.IORef
 #else
 import Control.Monad
 #endif
@@ -66,12 +65,44 @@ import System
 
 #ifdef mingw32_HOST_OS
 
-{-# NOINLINE argsRef #-}
-argsRef :: IORef [String]
-argsRef = unsafePerformIO $ do
-    -- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
-    init_args <- fmap dropRTSArgs getFullArgs
-    newIORef init_args
+-- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
+
+getWin32ProgArgv_certainly :: IO [String]
+getWin32ProgArgv_certainly = do
+	mb_argv <- getWin32ProgArgv
+	case mb_argv of
+	  Nothing   -> fmap dropRTSArgs getFullArgs
+	  Just argv -> return argv
+
+withWin32ProgArgv :: [String] -> IO a -> IO a
+withWin32ProgArgv argv act = bracket begin setWin32ProgArgv (\_ -> act)
+  where
+    begin = do
+	  mb_old_argv <- getWin32ProgArgv
+	  setWin32ProgArgv (Just argv)
+	  return mb_old_argv
+
+getWin32ProgArgv :: IO (Maybe [String])
+getWin32ProgArgv = alloca $ \p_argc -> alloca $ \p_argv -> do
+	c_getWin32ProgArgv p_argc p_argv
+	argc <- peek p_argc
+	argv_p <- peek p_argv
+	if argv_p == nullPtr
+	 then return Nothing
+	 else do
+	  argv_ps <- peekArray (fromIntegral argc) argv_p
+	  fmap Just $ mapM peekCWString argv_ps
+
+setWin32ProgArgv :: Maybe [String] -> IO ()
+setWin32ProgArgv Nothing = c_setWin32ProgArgv 0 nullPtr
+setWin32ProgArgv (Just argv) = withMany withCWString argv $ \argv_ps -> withArrayLen argv_ps $ \argc argv_p -> do
+	c_setWin32ProgArgv (fromIntegral argc) argv_p
+
+foreign import ccall unsafe "getWin32ProgArgv"
+  c_getWin32ProgArgv :: Ptr CInt -> Ptr (Ptr CWString) -> IO ()
+
+foreign import ccall unsafe "setWin32ProgArgv"
+  c_setWin32ProgArgv :: CInt -> Ptr CWString -> IO ()
 
 dropRTSArgs :: [String] -> [String]
 dropRTSArgs []             = []
@@ -87,7 +118,7 @@ dropRTSArgs (arg:rest)     = arg : dropRTSArgs rest
 getArgs :: IO [String]
 
 #ifdef mingw32_HOST_OS
-getArgs = fmap tail (readIORef argsRef)
+getArgs =  fmap tail getWin32ProgArgv_certainly
 #else
 getArgs =
   alloca $ \ p_argc ->
@@ -114,7 +145,7 @@ is probably really @FOO.EXE@, and that is what 'getProgName' will return.
 getProgName :: IO String
 #ifdef mingw32_HOST_OS
 -- Ignore the arguments to hs_init on Windows for the sake of Unicode compat
-getProgName = fmap (basename . head) (readIORef argsRef)
+getProgName = fmap (basename . head) getWin32ProgArgv_certainly
 #else
 getProgName =
   alloca $ \ p_argc ->
@@ -219,10 +250,7 @@ withArgv :: [String] -> IO a -> IO a
 -- We have to reflect the updated arguments in the RTS-side variables as
 -- well, because the RTS still consults them for error messages and the like.
 -- If we don't do this then ghc-e005 fails.
-withArgv new_args act = bracket (setArgs new_args) setArgs (\_ -> withProgArgv new_args act)
-
-setArgs :: [String] -> IO [String]
-setArgs argv = atomicModifyIORef argsRef $ \old_argv -> (argv, old_argv)
+withArgv new_args act = withWin32ProgArgv new_args $ withProgArgv new_args act
 #else
 withArgv = withProgArgv
 #endif
