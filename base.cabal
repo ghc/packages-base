@@ -54,6 +54,7 @@ Library {
             GHC.Float,
             GHC.Float.RealFracMethods,
             GHC.Foreign,
+            GHC.Float.ConversionUtils,
             GHC.ForeignPtr,
             GHC.MVar,
             GHC.IO,
@@ -123,6 +124,8 @@ Library {
         Control.Monad.ST
         Control.Monad.ST.Lazy
         Control.Monad.ST.Strict
+        Control.Monad.Group
+        Control.Monad.Zip
         Data.Bits,
         Data.Bool,
         Data.Char,
