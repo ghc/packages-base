@@ -162,9 +162,9 @@ peekEncodedCString :: TextEncoding -- ^ Encoding of CString
                    -> IO String    -- ^ String in Haskell terms
 peekEncodedCString (TextEncoding { mkTextDecoder = mk_decoder }) (p, sz_bytes)
   = bracket mk_decoder close $ \decoder -> do
-      let cHUNK_SIZE = 4096 -- Decode buffer chunk size in characters
+      let chunk_size = sz_bytes `max` 1 -- Decode buffer chunk size in characters: one iteration only for ASCII
       from0 <- fmap (\fp -> bufferAdd sz_bytes (emptyBuffer fp sz_bytes ReadBuffer)) $ newForeignPtr_ (castPtr p)
-      to <- newCharBuffer cHUNK_SIZE WriteBuffer
+      to <- newCharBuffer chunk_size WriteBuffer
 
       let go iteration from = do
             (why, from', to') <- encode decoder from to
