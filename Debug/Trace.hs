@@ -51,7 +51,7 @@ import System.IO (hPutStrLn,stderr)
 -- $tracing
 --
 -- The 'trace', 'traceShow' and 'traceIO' functions print messages to an output
--- stream. They are intended for \"prinf debugging\", that is: tracing the flow
+-- stream. They are intended for \"printf debugging\", that is: tracing the flow
 -- of execution and printing interesting values.
 
 -- The usual output stream is 'System.IO.stderr'. For Windows GUI applications
