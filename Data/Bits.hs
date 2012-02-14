@@ -238,7 +238,8 @@ class (Eq a, Num a) => Bits a where
     popCount = go 0
       where
         go !c 0 = c
-        go c w = go (c+1) (w .&. w - 1)  -- clear the least significant bit set
+        go c w = go (c+1) (w .&. (w - 1))  -- clear the least significant bit set
+    {-# INLINABLE popCountDefault #-}
     {- This implementation is intentionally naive.  Instances are
        expected to override it with something optimized for their
        size. -}
