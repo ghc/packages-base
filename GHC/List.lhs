@@ -45,6 +45,8 @@ import GHC.Base
 
 infixl 9  !!
 infix  4 `elem`, `notElem`
+
+{-# SUPERINLINABLE module #-}
 \end{code}
 
 %*********************************************************

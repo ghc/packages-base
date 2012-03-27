@@ -226,6 +226,8 @@ import GHC.Base
 
 infix 5 \\ -- comment to fool cpp
 
+{-# SUPERINLINABLE module #-}
+
 -- -----------------------------------------------------------------------------
 -- List functions
 

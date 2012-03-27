@@ -43,6 +43,8 @@ default ()              -- Double isn't available yet
 %*********************************************************
 
 \begin{code}
+{-# SUPERINLINABLE module #-}
+
 -- | The 'Bounded' class is used to name the upper and lower limits of a
 -- type.  'Ord' is not a superclass of 'Bounded' since types that are not
 -- totally ordered may also have upper and lower bounds.

@@ -128,6 +128,8 @@ infixl 1  >>, >>=
 infixr 0  $
 
 default ()              -- Double isn't available yet
+
+{-# SUPERINLINABLE module #-}
 \end{code}
 
 
@@ -281,6 +283,7 @@ foldr            :: (a -> b -> b) -> b -> [a] -> b
 -- ones we are keen about specialising!
 foldr k z = go
           where
+            {-# SUPERINLINABLE go #-}
             go []     = z
             go (y:ys) = y `k` go ys
 
