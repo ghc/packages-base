@@ -18,9 +18,13 @@
 module Text.Read.Lex
   -- lexing types
   ( Lexeme(..)  -- :: *; Show, Eq
+  , Lexeme'(..)
+
+  , numberToInteger, numberToRangedRational
 
   -- lexer
   , lex         -- :: ReadP Lexeme      Skips leading spaces
+  , lex'        -- :: ReadP Lexeme      Skips leading spaces
   , hsLex       -- :: ReadP String
   , lexChar     -- :: ReadP Char        Reads just one char, with H98 escapes
 
@@ -70,11 +74,67 @@ data Lexeme
   | EOF
  deriving (Eq, Show)
 
+data Lexeme' = Ident' String
+             | Punc'   String
+             | Symbol' String
+             | Number Number
+ deriving (Eq, Show)
+
+data Number = MkNumber Int              -- Base
+                       Digits           -- Integral part
+            | MkDecimal Digits          -- Integral part
+                        (Maybe Digits)  -- Fractional part
+                        (Maybe Integer) -- Exponent
+ deriving (Eq, Show)
+
+numberToInteger :: Number -> Maybe Integer
+numberToInteger (MkNumber base iPart) = Just (val (fromIntegral base) 0 iPart)
+numberToInteger (MkDecimal iPart Nothing Nothing) = Just (val 10 0 iPart)
+numberToInteger _ = Nothing
+
+numberToRangedRational :: (Int, Int) -> Number
+                       -> Maybe Rational -- Nothing = Inf
+numberToRangedRational (neg, pos) n@(MkDecimal iPart mFPart (Just exp))
+    = let mFirstDigit = case dropWhile (0 ==) iPart of
+                        iPart'@(_ : _) -> Just (length iPart')
+                        [] -> case mFPart of
+                              Nothing -> Nothing
+                              Just fPart ->
+                                  case span (0 ==) fPart of
+                                  (_, []) -> Nothing
+                                  (zeroes, _) ->
+                                      Just (negate (length zeroes))
+      in case mFirstDigit of
+         Nothing -> Just 0
+         Just firstDigit ->
+             let firstDigit' = firstDigit + fromInteger exp
+             in if firstDigit' > (pos + 3)
+                then Nothing
+                else if firstDigit' < (neg - 3)
+                then Just 0
+                else Just (numberToRational n)
+numberToRangedRational _ n = Just (numberToRational n)
+
+numberToRational :: Number -> Rational
+numberToRational (MkNumber base iPart) = val (fromIntegral base) 0 iPart % 1
+numberToRational (MkDecimal iPart mFPart mExp)
+ = let i = val 10 0 iPart
+   in case (mFPart, mExp) of
+      (Nothing, Nothing)     -> i % 1
+      (Nothing, Just exp)
+       | exp >= 0            -> (i * (10 ^ exp)) % 1
+       | otherwise           -> i % (10 ^ (- exp))
+      (Just fPart, Nothing)  -> fracExp 0   i fPart
+      (Just fPart, Just exp) -> fracExp exp i fPart
+
 -- -----------------------------------------------------------------------------
 -- Lexing
 
 lex :: ReadP Lexeme
 lex = skipSpaces >> lexToken
+
+lex' :: ReadP Lexeme'
+lex' = skipSpaces >> lexToken'
 
 hsLex :: ReadP String
 -- ^ Haskell lexer: returns the lexed string, rather than the lexeme
@@ -90,6 +150,11 @@ lexToken = lexEOF     +++
            lexSymbol  +++
            lexId      +++
            lexNumber
+
+lexToken' :: ReadP Lexeme'
+lexToken' = lexSymbol' +++
+            lexId'     +++
+            fmap Number lexNumber'
 
 
 -- ----------------------------------------------------------------------
@@ -123,6 +188,17 @@ lexSymbol =
   isSymbolChar c = c `elem` "!@#$%&*+./<=>?\\^|:-~"
   reserved_ops   = ["..", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>"]
 
+lexSymbol' :: ReadP Lexeme'
+lexSymbol' =
+  do s <- munch1 isSymbolChar
+     if s `elem` reserved_ops then
+        return (Punc' s)         -- Reserved-ops count as punctuation
+      else
+        return (Symbol' s)
+ where
+  isSymbolChar c = c `elem` "!@#$%&*+./<=>?\\^|:-~"
+  reserved_ops   = ["..", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>"]
+
 -- ----------------------------------------------------------------------
 -- identifiers
 
@@ -138,6 +214,15 @@ lexId = lex_nan <++ lex_id
                 s <- munch isIdfChar
                 return (Ident (c:s))
 
+          -- Identifiers can start with a '_'
+    isIdsChar c = isAlpha c || c == '_'
+    isIdfChar c = isAlphaNum c || c `elem` "_'"
+
+lexId' :: ReadP Lexeme'
+lexId' = do c <- satisfy isIdsChar
+            s <- munch isIdfChar
+            return (Ident' (c:s))
+  where
           -- Identifiers can start with a '_'
     isIdsChar c = isAlpha c || c == '_'
     isIdfChar c = isAlphaNum c || c `elem` "_'"
@@ -314,12 +399,25 @@ lexNumber
                         -- If that fails, try for a decimal number
     lexDecNumber        -- Start with ordinary digits
 
+lexNumber' :: ReadP Number
+lexNumber'
+  = lexHexOct'  <++      -- First try for hex or octal 0x, 0o etc
+                         -- If that fails, try for a decimal number
+    lexDecNumber'
+
 lexHexOct :: ReadP Lexeme
 lexHexOct
   = do  _ <- char '0'
         base <- lexBaseChar
         digits <- lexDigits base
         return (Int (val (fromIntegral base) 0 digits))
+
+lexHexOct' :: ReadP Number
+lexHexOct'
+  = do  _ <- char '0'
+        base <- lexBaseChar
+        digits <- lexDigits base
+        return (MkNumber base digits)
 
 lexBaseChar :: ReadP Int
 -- Lex a single character indicating the base; fail if not there
@@ -353,6 +451,13 @@ lexDecNumber =
     -- Instead of calculating the fractional part alone, then
     -- adding the integral part and finally multiplying with
     -- 10 ^ exp if an exponent was given, do it all at once.
+
+lexDecNumber' :: ReadP Number
+lexDecNumber' =
+  do xs    <- lexDigits 10
+     mFrac <- lexFrac <++ return Nothing
+     mExp  <- lexExp  <++ return Nothing
+     return (MkDecimal xs mFrac mExp)
 
 lexFrac :: ReadP (Maybe Digits)
 -- Read the fractional part; fail if it doesn't
