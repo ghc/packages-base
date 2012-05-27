@@ -3,7 +3,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DataKinds #-}
 {-# OPTIONS_GHC -XNoImplicitPrelude #-}
-module GHC.IP (IP, IPName(..), IPValue, ipUse, ipDef) where
+module GHC.IP (IP, IPName(..), ipUse, ipDef) where
 
 import GHC.TypeLits
 
@@ -22,11 +22,9 @@ ipUse x = case val x of
   where val :: IP x a => IPName x -> IPValue x a
         val _ = ip
 
--- | This is used when we construct evidence for the 'IP' class.
--- @let ?x = e in ...@ uses @ipDef (IPName :: "x") e@ to cinstruct
--- a new implict parameter.
-ipDef :: IPName x -> a -> IPValue x a
-ipDef _ a = IPValue a
+-- Used internally by the compiler to create `IP` dictionaries.
+ipDef :: a -> IPValue x a
+ipDef = IPValue
 
 -- | The syntax @?x :: a@ is desugared into @IP "x" a@
 class IP x a | x -> a where
