@@ -122,5 +122,11 @@ HsWord64 getUSecOfDay(void)
     return t;
 }
 
+BOOL file_exists(LPCTSTR path)
+{
+    DWORD r = GetFileAttributes(path);
+    return r != INVALID_FILE_ATTRIBUTES;
+}
+
 #endif
 
