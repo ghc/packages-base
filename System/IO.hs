@@ -1,5 +1,6 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE CPP, NoImplicitPrelude #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -240,6 +241,9 @@ import Data.Bits
 import Data.List
 import Data.Maybe
 import Foreign.C.Error
+#ifdef mingw32_HOST_OS
+import Foreign.C.String
+#endif
 import Foreign.C.Types
 import System.Posix.Internals
 import System.Posix.Types
@@ -563,13 +567,6 @@ openTempFile' loc tmp_dir template binary mode = do
          _                      -> error "bug in System.IO.openTempFile"
 
 #ifndef __NHC__
-    oflags1 = rw_flags .|. o_EXCL
-
-    binary_flags
-      | binary    = o_BINARY
-      | otherwise = 0
-
-    oflags = oflags1 .|. binary_flags
 #endif
 
 #if defined(__NHC__)
@@ -577,24 +574,19 @@ openTempFile' loc tmp_dir template binary mode = do
                         return (filepath, h)
 #elif defined(__GLASGOW_HASKELL__)
     findTempName x = do
-      fd <- withFilePath filepath $ \ f ->
-              c_open f oflags mode
-      if fd < 0
-       then do
-         errno <- getErrno
-         if errno == eEXIST
-           then findTempName (x+1)
-           else ioError (errnoToIOError loc errno Nothing (Just tmp_dir))
-       else do
+      r <- openNewFile filepath binary mode
+      case r of
+        FileExists -> findTempName (x + 1)
+        OpenNewError errno -> ioError (errnoToIOError loc errno Nothing (Just tmp_dir))
+        NewFileCreated fd -> do
+          (fD,fd_type) <- FD.mkFD fd ReadWriteMode Nothing{-no stat-}
+                               False{-is_socket-}
+                               True{-is_nonblock-}
 
-         (fD,fd_type) <- FD.mkFD fd ReadWriteMode Nothing{-no stat-}
-                              False{-is_socket-} 
-                              True{-is_nonblock-}
+          enc <- getLocaleEncoding
+          h <- mkHandleFromFD fD fd_type filepath ReadWriteMode False{-set non-block-} (Just enc)
 
-         enc <- getLocaleEncoding
-         h <- mkHandleFromFD fD fd_type filepath ReadWriteMode False{-set non-block-} (Just enc)
-
-         return (filepath, h)
+          return (filepath, h)
 #else
          h <- fdToHandle fd `onException` c_close fd
          return (filepath, h)
@@ -613,6 +605,52 @@ openTempFile' loc tmp_dir template binary mode = do
 
 #if __HUGS__
         fdToHandle fd   = openFd (fromIntegral fd) False ReadWriteMode binary
+#endif
+
+#if defined(__GLASGOW_HASKELL__)
+data OpenNewFileResult
+  = NewFileCreated CInt
+  | FileExists
+  | OpenNewError Errno
+
+openNewFile :: FilePath -> Bool -> CMode -> IO OpenNewFileResult
+openNewFile filepath binary mode = do
+  let oflags1 = rw_flags .|. o_EXCL
+
+      binary_flags
+        | binary    = o_BINARY
+        | otherwise = 0
+
+      oflags = oflags1 .|. binary_flags
+  fd <- withFilePath filepath $ \ f ->
+          c_open f oflags mode
+  if fd < 0
+    then do
+      errno <- getErrno
+      case errno of
+        _ | errno == eEXIST -> return FileExists
+# ifdef mingw32_HOST_OS
+        -- If c_open throws EACCES on windows, it could mean that filepath is a
+        -- directory. In this case, we want to return FileExists so that the
+        -- enclosing openTempFile can try again instead of failing outright.
+        -- See bug #4968.
+        _ | errno == eACCES -> do
+          withCString filepath $ \path -> do
+          -- There is a race here: the directory might have been moved or
+          -- deleted between the c_open call and the next line, but there
+          -- doesn't seem to be any direct way to detect that the c_open call
+          -- failed because of an existing directory.
+          exists <- c_fileExists path
+          return $ if exists
+            then FileExists
+            else OpenNewError errno
+# endif
+        _ -> return (OpenNewError errno)
+    else return (NewFileCreated fd)
+
+# ifdef mingw32_HOST_OS
+foreign import ccall "file_exists" c_fileExists :: CString -> IO Bool
+# endif
 #endif
 
 -- XXX Should use filepath library
