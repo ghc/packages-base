@@ -56,6 +56,7 @@ module GHC.Event.IntMap
     , empty
 
     -- * Insertion
+    , insert
     , insertWith
 
     -- * Delete\/Update
@@ -156,6 +157,11 @@ empty = Nil
 
 ------------------------------------------------------------------------
 -- Insert
+
+-- | /O(min(n,W))/ Insert a new key/value pair.  If the key is already present,
+-- replace its value with the one given.
+insert :: Key -> a -> IntMap a -> (Maybe a, IntMap a)
+insert k v = insertWith (\new _old -> new) k v
 
 -- | /O(min(n,W))/ Insert with a function, combining new value and old
 -- value.  @insertWith f key value mp@ will insert the pair (key,

@@ -222,6 +222,10 @@ Library {
         cbits/inputReady.c
         cbits/primFloat.c
         cbits/md5.c
+    if os(windows) {
+        c-sources:
+            cbits/iocp.c
+    }
     include-dirs: include
     includes:    HsBase.h
     install-includes:    HsBase.h HsBaseConfig.h EventConfig.h WCsubst.h consUtils.h Typeable.h
@@ -243,6 +247,17 @@ Library {
             GHC.Event.PSQ
             GHC.Event.Poll
             GHC.Event.Thread
+            GHC.Event.Unique
+    } else {
+        exposed-modules:
+            GHC.Event.Windows
+        other-modules:
+            GHC.Event.IntMap
+            GHC.Event.Windows.Clock
+            GHC.Event.Windows.FFI
+            GHC.Event.Windows.Thread
+            GHC.Event.Windows.Worker
+            GHC.Event.PSQ
             GHC.Event.Unique
     }
     -- We need to set the package name to base (without a version number)
