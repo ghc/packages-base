@@ -58,6 +58,8 @@ import Hugs.Prelude(Num(fromInt), Fractional(fromDouble))
 
 infix  6  :+
 
+{-# SUPERINLINABLE module #-}
+
 -- -----------------------------------------------------------------------------
 -- The Complex type
 
