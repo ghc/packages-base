@@ -65,6 +65,7 @@ import qualified GHC.Conc.Windows as Windows
 import GHC.Conc.Windows (asyncRead, asyncWrite, asyncDoProc, asyncReadBA,
                          asyncWriteBA, ConsoleEvent(..), win32ConsoleHandler,
                          toWin32ConsoleEvent)
+import qualified GHC.Event.Windows.Thread as Event
 #else
 import qualified GHC.Event.Thread as Event
 #endif
@@ -73,7 +74,9 @@ ensureIOManagerIsRunning :: IO ()
 #ifndef mingw32_HOST_OS
 ensureIOManagerIsRunning = Event.ensureIOManagerIsRunning
 #else
-ensureIOManagerIsRunning = Windows.ensureIOManagerIsRunning
+ensureIOManagerIsRunning = do
+    Event.ensureIOManagerIsRunning
+    Windows.ensureIOManagerIsRunning
 #endif
 
 -- | Block the current thread until data is available to read on the
@@ -134,11 +137,7 @@ closeFdWith close fd
 --
 threadDelay :: Int -> IO ()
 threadDelay time
-#ifdef mingw32_HOST_OS
-  | threaded  = Windows.threadDelay time
-#else
   | threaded  = Event.threadDelay time
-#endif
   | otherwise = IO $ \s ->
         case time of { I# time# ->
         case delay# time# s of { s' -> (# s', () #)
@@ -149,11 +148,7 @@ threadDelay time
 --
 registerDelay :: Int -> IO (TVar Bool)
 registerDelay usecs
-#ifdef mingw32_HOST_OS
-  | threaded = Windows.registerDelay usecs
-#else
   | threaded = Event.registerDelay usecs
-#endif
   | otherwise = error "registerDelay: requires -threaded"
 
 foreign import ccall unsafe "rtsSupportsBoundThreads" threaded :: Bool
