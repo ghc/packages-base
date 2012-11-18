@@ -133,7 +133,7 @@ installHandler handler
 
    no_handler = error "win32ConsoleHandler"
 
-foreign import ccall "rtsSupportsBoundThreads" threaded :: Bool
+foreign import ccall unsafe "rtsSupportsBoundThreads" threaded :: Bool
 
 foreign import ccall unsafe "RtsExternal.h rts_InstallConsoleEvent" 
   rts_installHandler :: CInt -> Ptr (StablePtr (CInt -> IO ())) -> IO CInt

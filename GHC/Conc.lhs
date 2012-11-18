@@ -37,6 +37,8 @@ module GHC.Conc
         , forkOnIO
         , forkOnIOUnmasked
         , forkOnWithUnmask
+        , rtsSupportsBoundThreads
+        , forkOSMasked
         , numCapabilities
         , getNumCapabilities
         , setNumCapabilities
