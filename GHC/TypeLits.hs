@@ -30,7 +30,7 @@ module GHC.TypeLits
   , type (-)
 
     -- * Comparing for equality
-  , type (:~:) (..), eqSingNat, eqSingSym
+  , type (:~:) (..), eqSingNat, eqSingSym, SingEquality (..)
 
     -- * Destructing type-nat singletons.
   , isZero, IsZero(..)
@@ -56,6 +56,7 @@ import Unsafe.Coerce(unsafeCoerce)
 -- import Data.Bits(testBit,shiftR)
 import Data.Maybe(Maybe(..))
 import Data.List((++))
+import Control.Monad (guard, return, (>>))
 
 -- | (Kind) A kind useful for passing kinds as parameters.
 data OfKind (a :: *) = KindParam
@@ -133,6 +134,11 @@ class (kparam ~ KindParam) => SingE (kparam :: OfKind k) where
   type DemoteRep kparam :: *
   fromSing :: Sing (a :: k) -> DemoteRep kparam
 
+class (kparam ~ KindParam, SingE (kparam :: OfKind k)) => SingEquality (kparam :: OfKind k) where
+  type SameSing kparam :: k -> k -> *
+  type SameSing kparam = (:~:)
+  sameSing :: Sing a -> Sing b -> Maybe (SameSing kparam a b)
+
 instance SingE (KindParam :: OfKind Nat) where
   type DemoteRep (KindParam :: OfKind Nat) = Integer
   fromSing (SNat n) = n
@@ -140,6 +146,12 @@ instance SingE (KindParam :: OfKind Nat) where
 instance SingE (KindParam :: OfKind Symbol) where
   type DemoteRep (KindParam :: OfKind Symbol) = String
   fromSing (SSym s) = s
+
+instance SingEquality (KindParam :: OfKind Nat) where
+  sameSing = eqSingNat
+
+instance SingEquality (KindParam :: OfKind Symbol) where
+  sameSing = eqSingSym
 
 {- | A convenient name for the type used to representing the values
 for a particular singleton family.  For example, @Demote 2 ~ Integer@,
