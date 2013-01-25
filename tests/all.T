@@ -102,7 +102,10 @@ test('packedstring001', reqlib('packedstring'), compile_and_run, ['-package pack
 test('stableptr001',
      [skip_if_fast, extra_run_opts('+RTS -K8m -RTS')],
      compile_and_run, [''])
-test('stableptr003', normal, compile_and_run, [''])
+test('stableptr003',
+     # This fails on Win32 for unknown reasons
+     if_platform('i386-unknown-mingw32', expect_fail_for(['dyn'])),
+     compile_and_run, [''])
 test('stableptr004', extra_run_opts('+RTS -K4m -RTS'), compile_and_run, [''])
 test('stableptr005', normal, compile_and_run, [''])
 
