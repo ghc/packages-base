@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}           -- for declaring operators + sing family
 {-# LANGUAGE TypeOperators #-}          -- for declaring operator
 {-# LANGUAGE EmptyDataDecls #-}         -- for declaring the kinds
+{-# LANGUAGE EmptyCase #-}              -- for absurd
 {-# LANGUAGE GADTs #-}                  -- for examining type nats
 {-# LANGUAGE PolyKinds #-}              -- for Sing family
 {-# LANGUAGE FlexibleContexts #-}
@@ -56,6 +57,7 @@ import Unsafe.Coerce(unsafeCoerce)
 -- import Data.Bits(testBit,shiftR)
 import Data.Maybe(Maybe(..))
 import Data.List((++))
+import Data.Either(Either (..))
 import Control.Monad (guard, return, (>>))
 
 -- | (Kind) A kind useful for passing kinds as parameters.
@@ -138,6 +140,10 @@ class (kparam ~ KindParam, SingE (kparam :: OfKind k)) => SingEquality (kparam :
   type SameSing kparam :: k -> k -> *
   type SameSing kparam = (:~:)
   sameSing :: Sing a -> Sing b -> Maybe (SameSing kparam a b)
+  sameSing a b = case decideSing a b of
+                 Right witness -> Just witness
+                 otherwise -> Nothing
+  decideSing :: Sing a -> Sing b -> Decision (SameSing kparam a b)
 
 instance SingE (KindParam :: OfKind Nat) where
   type DemoteRep (KindParam :: OfKind Nat) = Integer
@@ -149,9 +155,13 @@ instance SingE (KindParam :: OfKind Symbol) where
 
 instance SingEquality (KindParam :: OfKind Nat) where
   sameSing = eqSingNat
+  decideSing a b = case eqSingNat a b of
+                   Just witness -> Right witness
 
 instance SingEquality (KindParam :: OfKind Symbol) where
   sameSing = eqSingSym
+  decideSing a b = case eqSingSym a b of
+                   Just witness -> Right witness
 
 {- | A convenient name for the type used to representing the values
 for a particular singleton family.  For example, @Demote 2 ~ Integer@,
@@ -247,6 +257,18 @@ data (:~:) :: k -> k -> * where
 
 instance Show (a :~: b) where
   show Refl = "Refl"
+
+
+-- | A type that has no inhabitants.
+data Void
+
+-- | Anything follow from falseness.
+absurd :: Void -> a
+absurd x = case x of {}
+
+type Refuted a = a -> Void
+
+type Decision a = Either (Refuted a) a
 
 {- | Check if two type-natural singletons of potentially different types
 are indeed the same, by comparing their runtime representations.
