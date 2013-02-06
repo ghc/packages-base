@@ -57,8 +57,7 @@ import Unsafe.Coerce(unsafeCoerce)
 -- import Data.Bits(testBit,shiftR)
 import Data.Maybe(Maybe(..))
 import Data.List((++))
-import Data.Either(Either (..))
-import Control.Monad (guard, return, (>>))
+import Data.Either(Either(..))
 
 -- | (Kind) A kind useful for passing kinds as parameters.
 data OfKind (a :: *) = KindParam
