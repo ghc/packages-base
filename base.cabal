@@ -95,6 +95,7 @@ Library {
             GHC.Ptr,
             GHC.Read,
             GHC.Real,
+            GHC.Singletons,
             GHC.ST,
             GHC.Stack,
             GHC.Stats,
@@ -102,12 +103,16 @@ Library {
             GHC.Stable,
             GHC.Storable,
             GHC.STRef,
+            GHC.TypeEq,
             GHC.TypeLits,
+            GHC.TypeLits.Unsafe,
             GHC.TopHandler,
             GHC.Unicode,
             GHC.Weak,
             GHC.Word,
             System.Timeout
+        other-modules:
+            GHC.TypeLits.Internals
         if os(windows)
             exposed-modules: GHC.IO.Encoding.CodePage.Table
                              GHC.Conc.Windows

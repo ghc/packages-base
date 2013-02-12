@@ -19,19 +19,12 @@ module GHC.TypeLits
   ( -- * Kinds
     Nat, Symbol
 
-    -- * Linking type and value level
-  , Sing, SingI, SingE, SingRep, sing, fromSing
-  , unsafeSingNat, unsafeSingSymbol
-
-    -- * Working with singletons
-  , withSing, singThat
-
     -- * Functions on type nats
   , type (<=), type (<=?), type (+), type (*), type (^)
   , type (-)
 
     -- * Comparing for equality
-  , type (:~:) (..), eqSingNat, eqSingSym, SingEquality (..)
+  , eqSingNat, eqSingSym
 
     -- * Destructing type-nat singletons.
   , isZero, IsZero(..)
@@ -43,11 +36,11 @@ module GHC.TypeLits
     -- * Matching on type-nats
   , Nat1(..), FromNat1
 
-    -- * Kind parameters
-  , OfKind(..), Demote, DemoteRep
-  , KindOf
   ) where
 
+import GHC.TypeLits.Internals
+import GHC.Singletons
+import GHC.TypeEq
 import GHC.Base(Eq((==)), Bool(..), ($), otherwise, (.))
 import GHC.Num(Integer, (-))
 import GHC.Base(String)
@@ -59,45 +52,11 @@ import Data.Maybe(Maybe(..))
 import Data.List((++))
 import Data.Either(Either(..))
 
--- | (Kind) A kind useful for passing kinds as parameters.
-data OfKind (a :: *) = KindParam
-
-{- | A shortcut for naming the kind parameter corresponding to the
-kind of a some type.  For example, @KindOf Int ~ (KindParam :: OfKind *)@,
-but @KindOf 2 ~ (KindParam :: OfKind Nat)@. -}
-type KindOf (a :: k) = (KindParam :: OfKind k)
-
-
 -- | (Kind) This is the kind of type-level natural numbers.
 data Nat
 
 -- | (Kind) This is the kind of type-level symbols.
 data Symbol
-
-
---------------------------------------------------------------------------------
-data family Sing (n :: k)
-
-newtype instance Sing (n :: Nat)    = SNat Integer
-
-newtype instance Sing (n :: Symbol) = SSym String
-
-unsafeSingNat :: Integer -> Sing (n :: Nat)
-unsafeSingNat = SNat
-
-unsafeSingSymbol :: String -> Sing (n :: Symbol)
-unsafeSingSymbol = SSym
-
---------------------------------------------------------------------------------
-
--- | The class 'SingI' provides a \"smart\" constructor for singleton types.
--- There are built-in instances for the singleton types corresponding
--- to type literals.
-
-class SingI a where
-
-  -- | The only value of type @Sing a@
-  sing :: Sing a
 
 --------------------------------------------------------------------------------
 -- | Comparison of type-level naturals.
@@ -119,30 +78,33 @@ type family (m :: Nat) ^ (n :: Nat) :: Nat
 -- Note that this operation is unspecified for some inputs.
 type family (m :: Nat) - (n :: Nat) :: Nat
 
-
 --------------------------------------------------------------------------------
+{- | Check if two type-natural singletons of potentially different types
+are indeed the same, by comparing their runtime representations.
 
-{- | A class that converts singletons of a given kind into values of some
-representation type (i.e., we "forget" the extra information carried
-by the singletons, and convert them to ordinary values).
+WARNING: in combination with `unsafeSingNat` this may lead to unsoundness:
 
-Note that 'fromSing' is overloaded based on the /kind/ of the values
-and not their type---all types of a given kind are processed by the
-same instances.
+> eqSingNat (sing :: Sing 1) (unsafeSingNat 1 :: Sing 2)
+> == Just (Refl :: 1 :~: 2)
 -}
 
-class (kparam ~ KindParam) => SingE (kparam :: OfKind k) where
-  type DemoteRep kparam :: *
-  fromSing :: Sing (a :: k) -> DemoteRep kparam
+eqSingNat :: Sing (m :: Nat) -> Sing (n :: Nat) -> Maybe (m :~: n)
+eqSingNat x y
+  | fromSing x == fromSing y  = Just (unsafeCoerce Refl)
+  | otherwise                 = Nothing
 
-class (kparam ~ KindParam, SingE (kparam :: OfKind k)) => SingEquality (kparam :: OfKind k) where
-  type SameSing kparam :: k -> k -> *
-  type SameSing kparam = (:~:)
-  sameSing :: Sing a -> Sing b -> Maybe (SameSing kparam a b)
-  sameSing a b = case decideSing a b of
-                 Right witness -> Just witness
-                 otherwise -> Nothing
-  decideSing :: Sing a -> Sing b -> Decision (SameSing kparam a b)
+{- | Check if two symbol singletons of potentially different types
+are indeed the same, by comparing their runtime representations.
+WARNING: in combination with `unsafeSingSymbol` this may lead to unsoundness
+(see `eqSingNat` for an example).
+-}
+
+eqSingSym:: Sing (m :: Symbol) -> Sing (n :: Symbol) -> Maybe (m :~: n)
+eqSingSym x y
+  | fromSing x == fromSing y  = Just (unsafeCoerce Refl)
+  | otherwise                 = Nothing
+
+------------------------------------------------------------------------------
 
 instance SingE (KindParam :: OfKind Nat) where
   type DemoteRep (KindParam :: OfKind Nat) = Integer
@@ -152,56 +114,31 @@ instance SingE (KindParam :: OfKind Symbol) where
   type DemoteRep (KindParam :: OfKind Symbol) = String
   fromSing (SSym s) = s
 
+instance SingKind (KindParam :: OfKind Nat) where
+  singInstance _ = unsafeCoerce (SingInstance :: SingInstance 0)
+
+instance SingKind (KindParam :: OfKind Symbol) where
+  singInstance _ = unsafeCoerce (SingInstance :: SingInstance "")
+
 instance SingEquality (KindParam :: OfKind Nat) where
-  sameSing = eqSingNat
   decideSing a b = case eqSingNat a b of
-                   Just witness -> Right witness
+                     Just witness -> Right witness
+                     Nothing      -> Left (\bad -> unsafeCoerce bad)
 
 instance SingEquality (KindParam :: OfKind Symbol) where
-  sameSing = eqSingSym
   decideSing a b = case eqSingSym a b of
-                   Just witness -> Right witness
+                     Just witness -> Right witness
+                     Nothing      -> Left (\bad -> unsafeCoerce bad)
 
-{- | A convenient name for the type used to representing the values
-for a particular singleton family.  For example, @Demote 2 ~ Integer@,
-and also @Demote 3 ~ Integer@, but @Demote "Hello" ~ String@. -}
-type Demote a = DemoteRep (KindOf a)
+instance Show (Sing (a :: Nat)) where
+  showsPrec = showsPrecSing
+instance Show (Sing (a :: Symbol)) where
+  showsPrec = showsPrecSing
 
-{- | A convenience class, useful when we need to both introduce and eliminate
-a given singleton value. Users should never need to define instances of
-this classes. -}
-class    (SingI a, SingE (KindOf a)) => SingRep (a :: k)
-instance (SingI a, SingE (KindOf a)) => SingRep (a :: k)
-
-
-{- | A convenience function useful when we need to name a singleton value
-multiple times.  Without this function, each use of 'sing' could potentially
-refer to a different singleton, and one has to use type signatures to
-ensure that they are the same. -}
-
-withSing :: SingI a => (Sing a -> b) -> b
-withSing f = f sing
-
-
-{- | A convenience function that names a singleton satisfying a certain
-property.  If the singleton does not satisfy the property, then the function
-returns 'Nothing'. The property is expressed in terms of the underlying
-representation of the singleton. -}
-
-singThat :: SingRep a => (Demote a -> Bool) -> Maybe (Sing a)
-singThat p = withSing $ \x -> if p (fromSing x) then Just x else Nothing
-
-
-instance (SingE (KindOf a), Show (Demote a)) => Show (Sing a) where
-  showsPrec p = showsPrec p . fromSing
-
-instance (SingRep a, Read (Demote a), Eq (Demote a)) => Read (Sing a) where
-  readsPrec p cs = do (x,ys) <- readsPrec p cs
-                      case singThat (== x) of
-                        Just y  -> [(y,ys)]
-                        Nothing -> []
-
-
+instance Read (Sing (a :: Nat)) where
+  readsPrec = readsPrecSing
+instance Read (Sing (a :: Symbol)) where
+  readsPrec = readsPrecSing
 
 --------------------------------------------------------------------------------
 data IsZero :: Nat -> * where
@@ -247,53 +184,4 @@ data Nat1 = Zero | Succ Nat1
 type family FromNat1 (n :: Nat1) :: Nat
 type instance FromNat1 Zero     = 0
 type instance FromNat1 (Succ n) = 1 + FromNat1 n
-
---------------------------------------------------------------------------------
-
--- | A type that provides evidence for equality between two types.
-data (:~:) :: k -> k -> * where
-  Refl :: a :~: a
-
-instance Show (a :~: b) where
-  show Refl = "Refl"
-
-
--- | A type that has no inhabitants.
-data Void
-
--- | Anything follow from falseness.
-absurd :: Void -> a
-absurd x = case x of {}
-
-type Refuted a = a -> Void
-
-type Decision a = Either (Refuted a) a
-
-{- | Check if two type-natural singletons of potentially different types
-are indeed the same, by comparing their runtime representations.
-
-WARNING: in combination with `unsafeSingNat` this may lead to unsoundness:
-
-> eqSingNat (sing :: Sing 1) (unsafeSingNat 1 :: Sing 2)
-> == Just (Refl :: 1 :~: 2)
--}
-
-eqSingNat :: Sing (m :: Nat) -> Sing (n :: Nat) -> Maybe (m :~: n)
-eqSingNat x y
-  | fromSing x == fromSing y  = Just (unsafeCoerce Refl)
-  | otherwise                 = Nothing
-
-
-{- | Check if two symbol singletons of potentially different types
-are indeed the same, by comparing their runtime representations.
-WARNING: in combination with `unsafeSingSymbol` this may lead to unsoundness
-(see `eqSingNat` for an example).
--}
-
-eqSingSym:: Sing (m :: Symbol) -> Sing (n :: Symbol) -> Maybe (m :~: n)
-eqSingSym x y
-  | fromSing x == fromSing y  = Just (unsafeCoerce Refl)
-  | otherwise                 = Nothing
-
-
 
