@@ -43,6 +43,7 @@ import GHC.Num
 import GHC.Read
 import GHC.Show
 import Data.Maybe
+import Data.Proxy ( Proxy(..) ) -- so we can give an instance
 #else
 import Prelude
 #endif
@@ -141,6 +142,14 @@ instance Monoid Ordering where
         LT `mappend` _ = LT
         EQ `mappend` y = y
         GT `mappend` _ = GT
+
+instance Monoid (Proxy s) where
+    mempty = Proxy
+    {-# INLINE mempty #-}
+    mappend _ _ = Proxy
+    {-# INLINE mappend #-}
+    mconcat _ = Proxy
+    {-# INLINE mconcat #-}
 
 -- | The dual of a monoid, obtained by swapping the arguments of 'mappend'.
 newtype Dual a = Dual { getDual :: a }

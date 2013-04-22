@@ -23,7 +23,7 @@ module GHC.Enum(
         boundedEnumFrom, boundedEnumFromThen,
         toEnumError, fromEnumError, succError, predError,
 
-        -- Instances for Bounded and Enum: (), Char, Int
+        -- Instances for Bounded and Enum: (), Char, Int, Proxy
 
    ) where
 
@@ -32,6 +32,7 @@ import GHC.Char
 import GHC.Integer
 import GHC.Num
 import GHC.Show
+import Data.Proxy ( Proxy(..) ) -- so we can give an instance
 default ()              -- Double isn't available yet
 \end{code}
 
@@ -721,5 +722,30 @@ dn_list x0 delta lim = go (x0 :: Integer)
                     where
                         go x | x < lim   = []
                              | otherwise = x : go (x+delta)
+\end{code}
+
+%*********************************************************
+%*                                                      *
+\subsection{The @Proxy@ instance for @Enum@}
+%*                                                      *
+%*********************************************************
+
+\begin{code}
+
+instance Enum (Proxy s) where
+    succ _               = error "Proxy.succ"
+    pred _               = error "Proxy.pred"
+    fromEnum _           = 0
+    toEnum 0             = Proxy
+    toEnum _             = error "Proxy.toEnum: 0 expected"
+    enumFrom _           = [Proxy]
+    enumFromThen _ _     = [Proxy]
+    enumFromThenTo _ _ _ = [Proxy]
+    enumFromTo _ _       = [Proxy]
+
+instance Bounded (Proxy s) where
+    minBound = Proxy
+    maxBound = Proxy
+
 \end{code}
 

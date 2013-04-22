@@ -54,6 +54,7 @@ import Control.Monad.ST.Safe (ST)
 import qualified Control.Monad.ST.Lazy.Safe as Lazy (ST)
 import Data.Functor ((<$>), (<$))
 import Data.Monoid (Monoid(..))
+import Data.Proxy ( Proxy(..) ) -- so we can give an instance
 
 import Text.ParserCombinators.ReadP (ReadP)
 import Text.ParserCombinators.ReadPrec (ReadPrec)
@@ -226,6 +227,12 @@ instance Arrow a => Applicative (ArrowMonad a) where
 instance ArrowPlus a => Alternative (ArrowMonad a) where
    empty = ArrowMonad zeroArrow
    ArrowMonad x <|> ArrowMonad y = ArrowMonad (x <+> y)
+
+instance Applicative Proxy where
+    pure _ = Proxy
+    {-# INLINE pure #-}
+    _ <*> _ = Proxy
+    {-# INLINE (<*>) #-}
 
 -- new instances
 

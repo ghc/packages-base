@@ -5,6 +5,7 @@
            , ScopedTypeVariables
            , ForeignFunctionInterface
            , FlexibleInstances
+           -- , TypeOperators
            , PolyKinds
   #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
@@ -77,9 +78,13 @@ module Data.Typeable
         funResultTy,    -- :: TypeRep -> TypeRep   -> Maybe TypeRep
         typeRepTyCon,   -- :: TypeRep -> TyCon
         typeRepArgs,    -- :: TypeRep -> [TypeRep]
+
+        -- * Type-level reasoning with Typeable
+        -- eqTypeable, decideEqTypeable
   ) where
 
 import Data.Typeable.Internal hiding (mkTyCon)
+-- import Data.Type.Equality
 
 import Unsafe.Coerce
 import Data.Maybe
@@ -99,6 +104,7 @@ cast x = if typeRep (Proxy :: Proxy a) == typeRep (Proxy :: Proxy b)
            then Just $ unsafeCoerce x
            else Nothing
 
+-- TODO: should it be poly-kinded?
 -- | A flexible variation parameterised in a type constructor
 gcast :: (Typeable (a :: *), Typeable b) => c a -> Maybe (c b)
 gcast x = r
@@ -122,3 +128,11 @@ gcast2 :: forall c t t' a b. (Typeable (t :: * -> * -> *), Typeable t')
 gcast2 x = if typeRep (Proxy :: Proxy t) == typeRep (Proxy :: Proxy t')
              then Just $ unsafeCoerce x
              else Nothing
+{-
+eqTypeable :: (Typeable a, Typeable b) => Maybe (a :=: b)
+eqTypeable = undefined -- TODO: define it
+
+decideEqTypeable :: (Typeable a, Typeable b) => Decision (a :=: b)
+decideEqTypeable = undefined -- TODO: define it
+-- can't use EqT and DecideEqT because Typeable is in Constraint, not *
+-}

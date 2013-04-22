@@ -61,6 +61,7 @@ import qualified Text.Read.Lex as L
 import Text.ParserCombinators.ReadPrec
 
 import Data.Maybe
+import Data.Proxy ( Proxy(..) ) -- so we can give an instance
 
 import {-# SOURCE #-} GHC.Unicode       ( isDigit )
 import GHC.Num
@@ -443,6 +444,9 @@ instance Read L.Lexeme where
   readPrec     = lexP
   readListPrec = readListPrecDefault
   readList     = readListDefault
+
+instance Read (Proxy s) where
+  readsPrec d = readParen (d > 10) (\r -> [(Proxy, s) | ("Proxy",s) <- lex r ])
 \end{code}
 
 
