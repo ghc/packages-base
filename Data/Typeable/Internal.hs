@@ -50,7 +50,7 @@ import GHC.Word
 import GHC.Show
 import Data.Maybe
 import Data.List
-import Data.Proxy
+import {-# SOURCE #-} Data.Proxy
 import GHC.Num
 import GHC.Real
 import GHC.IORef
@@ -366,8 +366,6 @@ INSTANCE_TYPEABLE0(Word64,word64Tc,"Word64")
 
 INSTANCE_TYPEABLE0(TyCon,tyconTc,"TyCon")
 INSTANCE_TYPEABLE0(TypeRep,typeRepTc,"TypeRep")
-
-deriving instance Typeable Proxy
 
 #ifdef __GLASGOW_HASKELL__
 {-

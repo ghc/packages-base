@@ -49,7 +49,6 @@ import GHC.Base
 import GHC.List
 import GHC.Real
 import GHC.Show
-import Data.Proxy ( Proxy(..) ) -- so we can give an instance
 
 infixl 9  !, //
 
@@ -746,22 +745,6 @@ instance (Ix a, Show a, Show b) => Show (Array a b) where
         -- Precedence of 'array' is the precedence of application
 
 -- The Read instance is in GHC.Read
-\end{code}
-
-%*********************************************************
-%*                                                      *
-\subsection{Proxy instance}
-%*                                                      *
-%*********************************************************
-
-\begin{code}
-instance Ix (Proxy s) where
-    range _           = [Proxy]
-    index _ _         = 0
-    inRange _ _       = True
-    rangeSize _       = 1
-    unsafeIndex _ _   = 0
-    unsafeRangeSize _ = 1
 \end{code}
 
 

@@ -11,7 +11,7 @@ module Data.Typeable.Internal (
   ) where
 
 import GHC.Base
-import Data.Proxy
+import {-# SOURCE #-} Data.Proxy
 
 data TypeRep
 data TyCon

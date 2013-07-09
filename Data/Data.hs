@@ -1299,20 +1299,3 @@ instance (Typeable a, Data a, Data b, Ix a) => Data (Array a b)
   gunfold _ _  = error "Data.Data.gunfold(Array)"
   dataTypeOf _ = mkNoRepType "Data.Array.Array"
   dataCast2 x  = gcast2 x
-
-------------------------------------------------------------------------------
-
-proxyConstr :: Constr
-proxyConstr = mkConstr proxyDataType "Proxy" [] Prefix
-
-proxyDataType :: DataType
-proxyDataType = mkDataType "Data.Proxy.Proxy" [proxyConstr]
-
-instance (Data t) => Data (Proxy t) where
-  gfoldl _ z Proxy  = z Proxy
-  toConstr Proxy  = proxyConstr
-  gunfold _ z c = case constrIndex c of
-                    1 -> z Proxy
-                    _ -> error "Data.Data.gunfold(Proxy)"
-  dataTypeOf _ = proxyDataType
-  dataCast1 f  = gcast1 f

@@ -54,9 +54,6 @@ import GHC.Classes ( Eq, Ord )
 import GHC.Read ( Read )
 import GHC.Show ( Show )
 
--- Only for giving a Generic instance
-import Data.Proxy ( Proxy(..) )
-
 --------------------------------------------------------------------------------
 -- Representation types
 --------------------------------------------------------------------------------
@@ -211,7 +208,6 @@ class Generic1 f where
 deriving instance Generic [a]
 deriving instance Generic (Maybe a)
 deriving instance Generic (Either a b)
-deriving instance Generic (Proxy p)
 deriving instance Generic Bool
 deriving instance Generic Ordering
 deriving instance Generic ()
@@ -225,7 +221,6 @@ deriving instance Generic ((,,,,,,) a b c d e f g)
 deriving instance Generic1 []
 deriving instance Generic1 Maybe
 deriving instance Generic1 (Either a)
-deriving instance Generic1 Proxy
 deriving instance Generic1 ((,) a)
 deriving instance Generic1 ((,,) a b)
 deriving instance Generic1 ((,,,) a b c)
