@@ -47,7 +47,7 @@ import GHC.Num
 import GHC.ST
 import GHC.Base
 import GHC.List
-import GHC.Real
+import GHC.Real( fromIntegral )
 import GHC.Show
 
 infixl 9  !, //

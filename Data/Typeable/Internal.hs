@@ -49,19 +49,18 @@ import GHC.Base
 import GHC.Word
 import GHC.Show
 import Data.Maybe
-import Data.List
 import {-# SOURCE #-} Data.Proxy
 import GHC.Num
 import GHC.Real
-import GHC.IORef
-import GHC.IOArray
-import GHC.MVar
+-- import GHC.IORef
+-- import GHC.IOArray
+-- import GHC.MVar
 import GHC.ST           ( ST )
 import GHC.STRef        ( STRef )
 import GHC.Ptr          ( Ptr, FunPtr )
-import GHC.Stable
+-- import GHC.Stable
 import GHC.Arr          ( Array, STArray )
-import Data.Int
+-- import Data.Int
 
 import GHC.Fingerprint.Type
 import {-# SOURCE #-} GHC.Fingerprint
@@ -165,7 +164,7 @@ mkTyCon3 :: String       -- ^ package name
          -> String       -- ^ the name of the type constructor
          -> TyCon        -- ^ A unique 'TyCon' object
 mkTyCon3 pkg modl name =
-  TyCon (fingerprintString (unwords [pkg, modl, name])) pkg modl name
+  TyCon (fingerprintString (pkg ++ (' ':modl) ++ (' ':name))) pkg modl name
 
 ----------------- Observation ---------------------
 
@@ -246,7 +245,7 @@ instance Show TypeRep where
             showParen (p > 9) $
             showsPrec p tycon . 
             showChar ' '      . 
-            showArgs tys
+            showArgs (showChar ' ') tys
 
 showsTypeRep :: TypeRep -> ShowS
 showsTypeRep = shows
@@ -260,22 +259,21 @@ isTupleTyCon _                         = False
 
 -- Some (Show.TypeRep) helpers:
 
-showArgs :: Show a => [a] -> ShowS
-showArgs [] = id
-showArgs [a] = showsPrec 10 a
-showArgs (a:as) = showsPrec 10 a . showString " " . showArgs as 
+showArgs :: Show a => ShowS -> [a] -> ShowS
+showArgs _   []     = id
+showArgs _   [a]    = showsPrec 10 a
+showArgs sep (a:as) = showsPrec 10 a . sep . showArgs sep as 
 
 showTuple :: [TypeRep] -> ShowS
 showTuple args = showChar '('
-               . (foldr (.) id $ intersperse (showChar ',') 
-                               $ map (showsPrec 10) args)
+               . showArgs (showChar ',') args
                . showChar ')'
 
 listTc :: TyCon
 listTc = typeRepTyCon (typeOf [()])
 
 funTc :: TyCon
-funTc = mkTyCon3 "ghc-prim" "GHC.Types" "->"
+funTc = typeRepTyCon (typeRep (Proxy :: Proxy (->)))
 
 -------------------------------------------------------------
 --
@@ -289,27 +287,16 @@ INSTANCE_TYPEABLE0((),unitTc,"()")
 INSTANCE_TYPEABLE1([],listTc,"[]")
 INSTANCE_TYPEABLE1(Maybe,maybeTc,"Maybe")
 INSTANCE_TYPEABLE1(Ratio,ratioTc,"Ratio")
-#if defined(__GLASGOW_HASKELL__)
-{-
-TODO: Deriving this instance fails with:
-libraries/base/Data/Typeable.hs:589:1:
-    Can't make a derived instance of `Typeable2 (->)':
-      The last argument of the instance must be a data or newtype application
-    In the stand-alone deriving instance for `Typeable2 (->)'
--}
-instance Typeable (->) where { typeRep _ = mkTyConApp funTc [] }
-#else
 INSTANCE_TYPEABLE2((->),funTc,"->")
-#endif
 INSTANCE_TYPEABLE1(IO,ioTc,"IO")
 
 #if defined(__GLASGOW_HASKELL__) || defined(__HUGS__)
 -- Types defined in GHC.MVar
-INSTANCE_TYPEABLE1(MVar,mvarTc,"MVar" )
+{- INSTANCE_TYPEABLE1(MVar,mvarTc,"MVar" ) -}
 #endif
 
 INSTANCE_TYPEABLE2(Array,arrayTc,"Array")
-INSTANCE_TYPEABLE2(IOArray,iOArrayTc,"IOArray")
+{- INSTANCE_TYPEABLE2(IOArray,iOArrayTc,"IOArray") -}
 
 #ifdef __GLASGOW_HASKELL__
 -- Hugs has these too, but their Typeable<n> instances are defined
@@ -333,8 +320,10 @@ INSTANCE_TYPEABLE1(FunPtr,funPtrTc,"FunPtr")
 #ifndef __GLASGOW_HASKELL__
 INSTANCE_TYPEABLE1(ForeignPtr,foreignPtrTc,"ForeignPtr")
 #endif
+{-
 INSTANCE_TYPEABLE1(StablePtr,stablePtrTc,"StablePtr")
-INSTANCE_TYPEABLE1(IORef,iORefTc,"IORef")
+INSTANCE_TYPEABLE1(IORef,iORefTc,"IORef") 
+-}
 
 -------------------------------------------------------
 --
@@ -354,10 +343,12 @@ INSTANCE_TYPEABLE0(Ordering,orderingTc,"Ordering")
 INSTANCE_TYPEABLE0(Handle,handleTc,"Handle")
 #endif
 
+{-
 INSTANCE_TYPEABLE0(Int8,int8Tc,"Int8")
 INSTANCE_TYPEABLE0(Int16,int16Tc,"Int16")
 INSTANCE_TYPEABLE0(Int32,int32Tc,"Int32")
 INSTANCE_TYPEABLE0(Int64,int64Tc,"Int64")
+-}
 
 INSTANCE_TYPEABLE0(Word8,word8Tc,"Word8" )
 INSTANCE_TYPEABLE0(Word16,word16Tc,"Word16")
@@ -368,15 +359,5 @@ INSTANCE_TYPEABLE0(TyCon,tyconTc,"TyCon")
 INSTANCE_TYPEABLE0(TypeRep,typeRepTc,"TypeRep")
 
 #ifdef __GLASGOW_HASKELL__
-{-
-TODO: This can't be derived currently:
-libraries/base/Data/Typeable.hs:674:1:
-    Can't make a derived instance of `Typeable RealWorld':
-      The last argument of the instance must be a data or newtype application
-    In the stand-alone deriving instance for `Typeable RealWorld'
--}
-realWorldTc :: TyCon; \
-realWorldTc = mkTyCon3 "ghc-prim" "GHC.Types" "RealWorld"; \
-instance Typeable RealWorld where { typeRep _ = mkTyConApp realWorldTc [] }
-
+deriving instance Typeable RealWorld
 #endif

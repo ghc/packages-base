@@ -53,7 +53,7 @@ import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, readMVar, putMVar,
 import Control.Exception (onException)
 import Control.Monad ((=<<), forM_, liftM, when, replicateM, void)
 import Data.Bits ((.&.))
-import Data.IORef (IORef, atomicModifyIORef, mkWeakIORef, newIORef, readIORef,
+import Data.IORef (IORef, atomicModifyIORef', mkWeakIORef, newIORef, readIORef,
                    writeIORef)
 import Data.Maybe (Maybe(..))
 import Data.Monoid (mappend, mconcat, mempty)
@@ -176,7 +176,7 @@ newWith oneShot be = do
   state <- newIORef Created
   us <- newSource
   _ <- mkWeakIORef state $ do
-               st <- atomicModifyIORef state $ \s -> (Finished, s)
+               st <- atomicModifyIORef' state $ \s -> (Finished, s)
                when (st /= Finished) $ do
                  I.delete be
                  closeControl ctrl
@@ -193,20 +193,30 @@ newWith oneShot be = do
   registerControlFd mgr (wakeupReadFd ctrl) evtRead
   return mgr
 
+failOnInvalidFile :: String -> Fd -> IO Bool -> IO ()
+failOnInvalidFile loc fd m = do
+  ok <- m
+  when (not ok) $
+    let msg = "Failed while attempting to modify registration of file " ++
+              show fd ++ " at location " ++ loc
+    in error msg
+
 registerControlFd :: EventManager -> Fd -> Event -> IO ()
-registerControlFd mgr fd evs = I.modifyFd (emBackend mgr) fd mempty evs
+registerControlFd mgr fd evs =
+  failOnInvalidFile "registerControlFd" fd $
+  I.modifyFd (emBackend mgr) fd mempty evs
 
 -- | Asynchronously shuts down the event manager, if running.
 shutdown :: EventManager -> IO ()
 shutdown mgr = do
-  state <- atomicModifyIORef (emState mgr) $ \s -> (Dying, s)
+  state <- atomicModifyIORef' (emState mgr) $ \s -> (Dying, s)
   when (state == Running) $ sendDie (emControl mgr)
 
 -- | Asynchronously tell the thread executing the event
 -- manager loop to exit.
 release :: EventManager -> IO ()
 release EventManager{..} = do
-  state <- atomicModifyIORef emState $ \s -> (Releasing, s)
+  state <- atomicModifyIORef' emState $ \s -> (Releasing, s)
   when (state == Running) $ sendWakeup emControl
 
 finished :: EventManager -> IO Bool
@@ -230,7 +240,7 @@ cleanup EventManager{..} = do
 loop :: EventManager -> IO ()
 loop mgr@EventManager{..} = do
   void $ takeMVar emLock
-  state <- atomicModifyIORef emState $ \s -> case s of
+  state <- atomicModifyIORef' emState $ \s -> case s of
     Created -> (Running, s)
     Releasing -> (Running, s)
     _       -> (s, s)
@@ -284,21 +294,31 @@ registerFd_ mgr@(EventManager{..}) cb fd evs = do
   let fd'  = fromIntegral fd
       reg  = FdKey fd u
       !fdd = FdData reg evs cb
-  modifyMVar (callbackTableVar mgr fd) $ \oldMap ->
+  (modify,ok) <- modifyMVar (callbackTableVar mgr fd) $ \oldMap ->
     if haveOneShot && emOneShot
-    then case IM.insertWith (++) fd' [fdd] oldMap of
-      (Nothing,   n) -> do I.modifyFdOnce emBackend fd evs
-                           return (n, (reg, False))
-      (Just prev, n) -> do I.modifyFdOnce emBackend fd (combineEvents evs prev)
-                           return (n, (reg, False))
+    then do let (n,evs') = case IM.insertWith (++) fd' [fdd] oldMap of
+                  (Nothing,   n') -> (n', evs)
+                  (Just prev, n') -> (n', combineEvents evs prev)
+            ok <- I.modifyFdOnce emBackend fd evs'
+            if ok
+              then return (n, (False, True))
+              else return (oldMap, (False, False))
     else
       let (!newMap, (oldEvs, newEvs)) =
             case IM.insertWith (++) fd' [fdd] oldMap of
               (Nothing,   n) -> (n, (mempty, evs))
               (Just prev, n) -> (n, (eventsOf prev, combineEvents evs prev))
           modify = oldEvs /= newEvs
-      in do when modify $ I.modifyFd emBackend fd oldEvs newEvs
-            return (newMap, (reg, modify))
+      in do ok <- if modify
+                  then I.modifyFd emBackend fd oldEvs newEvs
+                  else return True
+            if ok
+              then return (newMap, (modify, True))
+              else return (oldMap, (False, False))
+  -- this simulates behavior of old IO manager:
+  -- i.e. just call the callback if the registration fails.
+  when (not ok) (cb reg evs)
+  return (reg,modify)
 {-# INLINE registerFd_ #-}
 
 combineEvents :: Event -> [FdData] -> Event
@@ -358,7 +378,7 @@ unregisterFd_ mgr@(EventManager{..}) (FdKey fd u) =
               (Nothing,   _)    -> (oldMap, (mempty, mempty))
               (Just prev, newm) -> (newm, pairEvents prev newm fd')
         modify = oldEvs /= newEvs
-    when modify $
+    when modify $ failOnInvalidFile "unregisterFd_" fd $
       if haveOneShot && emOneShot && newEvs /= mempty
       then I.modifyFdOnce emBackend fd newEvs
       else I.modifyFd emBackend fd oldEvs newEvs
@@ -380,7 +400,7 @@ closeFd mgr close fd = do
       (Just fds, !newMap) -> do
         let oldEvs = eventsOf fds
         when (oldEvs /= mempty) $ do
-          I.modifyFd (emBackend mgr) fd oldEvs mempty
+          _ <- I.modifyFd (emBackend mgr) fd oldEvs mempty
           wakeManager mgr
         close fd
         return (newMap, fds)
@@ -400,7 +420,7 @@ closeFd_ mgr oldMap fd = do
     (Just fds, !newMap) -> do
       let oldEvs = eventsOf fds
       when (oldEvs /= mempty) $ do
-        I.modifyFd (emBackend mgr) fd oldEvs mempty
+        _ <- I.modifyFd (emBackend mgr) fd oldEvs mempty
         wakeManager mgr
       let runCbs =
             forM_ fds $ \(FdData reg ev cb) -> cb reg (ev `mappend` evtClose)
@@ -439,16 +459,16 @@ onFdEvent mgr fd evs =
         aux [] _    []          =
           if haveOneShot
           then return (curmap, cbs)
-          else do I.modifyFd (emBackend mgr) fd (eventsOf cbs) mempty
+          else do _ <- I.modifyFd (emBackend mgr) fd (eventsOf cbs) mempty
                   return (curmap, cbs)
 
         -- reinsert and rearm; note that we already have the lock on the
         -- callback table for this fd, and we deleted above, so we know there
         -- is no entry in the table for this fd.
         aux [] fdds saved@(_:_) = do
-          if haveOneShot
-            then I.modifyFdOnce (emBackend mgr) fd $ eventsOf saved
-            else I.modifyFd (emBackend mgr) fd (eventsOf cbs) $ eventsOf saved
+          _ <- if haveOneShot
+               then I.modifyFdOnce (emBackend mgr) fd $ eventsOf saved
+               else I.modifyFd (emBackend mgr) fd (eventsOf cbs) $ eventsOf saved
           return (snd $ IM.insertWith (\_ _ -> saved) fd' saved curmap, fdds)
 
         -- continue, saving those callbacks that don't match the event

@@ -92,9 +92,7 @@ import {-# SOURCE #-} Data.Type.Equality
 
 import Unsafe.Coerce
 import Data.Maybe
-
 import GHC.Base
-import GHC.Err          (undefined)
 
 -------------------------------------------------------------
 --

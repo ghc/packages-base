@@ -17,10 +17,12 @@
 -- 'takeMVar' which empties an 'MVar' if it is full and blocks
 -- otherwise.  They can be used in multiple different ways:
 --
---  1. As synchronized mutable variables,
---  2. As channels, with 'takeMVar' and 'putMVar' as receive and send, and
---  3. As a binary semaphore @'MVar' ()@, with 'takeMVar' and 'putMVar' as
---     wait and signal.
+--   1. As synchronized mutable variables,
+--
+--   2. As channels, with 'takeMVar' and 'putMVar' as receive and send, and
+--
+--   3. As a binary semaphore @'MVar' ()@, with 'takeMVar' and 'putMVar' as
+--      wait and signal.
 --
 -- They were introduced in the paper "Concurrent Haskell" by Simon
 -- Peyton Jones, Andrew Gordon and Sigbjorn Finne, though some details
@@ -140,6 +142,7 @@ module Control.Concurrent.MVar
         , modifyMVarMasked_
         , modifyMVarMasked
 #ifndef __HUGS__
+        , tryReadMVar
         , mkWeakMVar
         , addMVarFinalizer
 #endif
@@ -153,7 +156,8 @@ import Hugs.ConcBase ( MVar, newEmptyMVar, newMVar, takeMVar, putMVar,
 
 #ifdef __GLASGOW_HASKELL__
 import GHC.MVar ( MVar(..), newEmptyMVar, newMVar, takeMVar, putMVar,
-                  tryTakeMVar, tryPutMVar, isEmptyMVar
+                  tryTakeMVar, tryPutMVar, isEmptyMVar, readMVar,
+                  tryReadMVar
                 )
 import qualified GHC.MVar
 import GHC.Weak
@@ -166,19 +170,6 @@ import Prelude
 #endif
 
 import Control.Exception.Base
-
-{-|
-  This is a combination of 'takeMVar' and 'putMVar'; ie. it takes the value
-  from the 'MVar', puts it back, and also returns it.  This function
-  is atomic only if there are no other producers (i.e. threads calling
-  'putMVar') for this 'MVar'.
--}
-readMVar :: MVar a -> IO a
-readMVar m =
-  mask_ $ do
-    a <- takeMVar m
-    putMVar m a
-    return a
 
 {-|
   Take a value from an 'MVar', put a new value into the 'MVar' and
@@ -234,7 +225,7 @@ modifyMVar :: MVar a -> (a -> IO (a,b)) -> IO b
 modifyMVar m io =
   mask $ \restore -> do
     a      <- takeMVar m
-    (a',b) <- restore (io a) `onException` putMVar m a
+    (a',b) <- restore (io a >>= evaluate) `onException` putMVar m a
     putMVar m a'
     return b
 
@@ -259,7 +250,7 @@ modifyMVarMasked :: MVar a -> (a -> IO (a,b)) -> IO b
 modifyMVarMasked m io =
   mask_ $ do
     a      <- takeMVar m
-    (a',b) <- io a `onException` putMVar m a
+    (a',b) <- (io a >>= evaluate) `onException` putMVar m a
     putMVar m a'
     return b
 
