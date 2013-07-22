@@ -1,5 +1,5 @@
 {-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE CPP, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE CPP, RankNTypes, ScopedTypeVariables, PolyKinds #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -265,7 +265,7 @@ class Typeable a => Data a where
 
   -- | Mediate types and unary type constructors.
   -- In 'Data' instances of the form @T a@, 'dataCast1' should be defined
-  -- as 'gcast1'.
+  -- as 'gcast'.
   --
   -- The default definition is @'const' 'Nothing'@, which is appropriate
   -- for non-unary type constructors.
@@ -276,7 +276,7 @@ class Typeable a => Data a where
 
   -- | Mediate types and binary type constructors.
   -- In 'Data' instances of the form @T a b@, 'dataCast2' should be
-  -- defined as 'gcast2'.
+  -- defined as 'gcast'.
   --
   -- The default definition is @'const' 'Nothing'@, which is appropriate
   -- for non-binary type constructors.

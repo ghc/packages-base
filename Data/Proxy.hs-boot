@@ -2,4 +2,4 @@
 
 module Data.Proxy ( Proxy(..) ) where
 
-data Proxy t = Proxy
+data Proxy (t :: k) = Proxy

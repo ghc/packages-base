@@ -114,23 +114,15 @@ eqT = if typeRep (Proxy :: Proxy a) == typeRep (Proxy :: Proxy b)
 
 -- | A flexible variation parameterised in a type constructor
 gcast :: forall a b c. (Typeable a, Typeable b) => c a -> Maybe (c b)
-gcast x = case eqT :: Maybe (a :=: b) of
-            Just Refl -> Just x
-            Nothing   -> Nothing
+gcast x = fmap (\Refl -> x) (eqT :: Maybe (a :=: b))
 
-{-# DEPRECATED gcast1, gcast2 "Use eqT or poly-kinded gcast instead" #-}
-
--- | Cast for * -> *
-gcast1 :: forall c t t' a. (Typeable (t :: * -> *), Typeable t')
+-- | Cast over @k1 -> k2@
+gcast1 :: forall c t t' a. (Typeable t, Typeable t')
        => c (t a) -> Maybe (c (t' a)) 
-gcast1 x = if typeRep (Proxy :: Proxy t) == typeRep (Proxy :: Proxy t')
-             then Just $ unsafeCoerce x
-             else Nothing
+gcast1 x = fmap (\Refl -> x) (eqT :: Maybe (t :=: t'))
 
--- | Cast for * -> * -> *
-gcast2 :: forall c t t' a b. (Typeable (t :: * -> * -> *), Typeable t')
+-- | Cast over @k1 -> k2 -> k3@
+gcast2 :: forall c t t' a b. (Typeable t, Typeable t')
        => c (t a b) -> Maybe (c (t' a b)) 
-gcast2 x = if typeRep (Proxy :: Proxy t) == typeRep (Proxy :: Proxy t')
-             then Just $ unsafeCoerce x
-             else Nothing
+gcast2 x = fmap (\Refl -> x) (eqT :: Maybe (t :=: t'))
 
