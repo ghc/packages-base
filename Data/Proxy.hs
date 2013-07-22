@@ -5,10 +5,17 @@ module Data.Proxy
         Proxy(..)
   ) where
 
+import Data.Data
+import Data.Monoid
+import Data.Traversable
+
+import Control.Applicative
+
 import GHC.Base
 import GHC.Show
 import GHC.Read
 import GHC.Enum
+import GHC.Arr
 
 -- | A concrete, poly-kinded proxy type
 data Proxy t = Proxy

@@ -1,5 +1,5 @@
-{-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE NoImplicitPrelude, PolyKinds #-}
 
 module Data.Proxy ( Proxy(..) ) where
 
-data Proxy t
+data Proxy t = Proxy

@@ -5,8 +5,9 @@
            , ScopedTypeVariables
            , ForeignFunctionInterface
            , FlexibleInstances
-           -- , TypeOperators
+           , TypeOperators
            , PolyKinds
+           , GADTs
   #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
@@ -44,6 +45,9 @@ module Data.Typeable
 
         -- * The Typeable class
         Typeable( typeRep ),
+
+        -- * Propositional equality
+        (:=:)(Refl),
 
         -- * For backwards compatibility
         typeOf, typeOf1, typeOf2, typeOf3, typeOf4, typeOf5, typeOf6, typeOf7,
@@ -84,7 +88,7 @@ module Data.Typeable
   ) where
 
 import Data.Typeable.Internal hiding (mkTyCon)
--- import Data.Type.Equality
+import {-# SOURCE #-} Data.Type.Equality
 
 import Unsafe.Coerce
 import Data.Maybe
@@ -104,16 +108,19 @@ cast x = if typeRep (Proxy :: Proxy a) == typeRep (Proxy :: Proxy b)
            then Just $ unsafeCoerce x
            else Nothing
 
--- TODO: should it be poly-kinded?
+-- | Extract a witness of equality of two types
+eqT :: forall a b. (Typeable a, Typeable b) => Maybe (a :=: b)
+eqT = if typeRep (Proxy :: Proxy a) == typeRep (Proxy :: Proxy b)
+      then Just $ unsafeCoerce Refl
+      else Nothing
+
 -- | A flexible variation parameterised in a type constructor
-gcast :: (Typeable (a :: *), Typeable b) => c a -> Maybe (c b)
-gcast x = r
- where
-  r = if typeRep (getArg x) == typeRep (getArg (fromJust r))
-        then Just $ unsafeCoerce x
-        else Nothing
-  getArg :: c x -> Proxy x 
-  getArg = undefined
+gcast :: forall a b c. (Typeable a, Typeable b) => c a -> Maybe (c b)
+gcast x = case eqT :: Maybe (a :=: b) of
+            Just Refl -> Just x
+            Nothing   -> Nothing
+
+{-# DEPRECATED gcast1, gcast2 "Use eqT or poly-kinded gcast instead" #-}
 
 -- | Cast for * -> *
 gcast1 :: forall c t t' a. (Typeable (t :: * -> *), Typeable t')
@@ -128,11 +135,4 @@ gcast2 :: forall c t t' a b. (Typeable (t :: * -> * -> *), Typeable t')
 gcast2 x = if typeRep (Proxy :: Proxy t) == typeRep (Proxy :: Proxy t')
              then Just $ unsafeCoerce x
              else Nothing
-{-
-eqTypeable :: (Typeable a, Typeable b) => Maybe (a :=: b)
-eqTypeable = undefined -- TODO: define it
 
-decideEqTypeable :: (Typeable a, Typeable b) => Decision (a :=: b)
-decideEqTypeable = undefined -- TODO: define it
--- can't use EqT and DecideEqT because Typeable is in Constraint, not *
--}
