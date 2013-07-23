@@ -6,13 +6,16 @@
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE NoImplicitPrelude  #-}
+{-# LANGUAGE PolyKinds          #-}
 
 module Data.Type.Equality where
 
 import Data.Data
-import Data.Ix
-import GHC.Generics
-import Control.Exception
+import Data.Maybe
+import GHC.Enum
+import GHC.Show
+import GHC.Read
+import GHC.Base
 import Control.Category
 
 infix 4 :=:
@@ -38,7 +41,7 @@ trans Refl Refl = Refl
 
 -- | Type-safe cast, using propositional equality
 coerce :: (a :=: b) -> a -> b
-coerce Refl = Prelude.id
+coerce Refl x = x
 
 -- | Lift equality into a unary type constructor
 liftEq :: (a :=: b) -> (f a :=: f b)
@@ -68,7 +71,7 @@ deriving instance Typeable (:=:)
 deriving instance (Typeable a, Data a) => Data (a :=: a)
 
 instance Read (a :=: a) where
-  readsPrec d = readParen False (\r -> [(Refl, s) | ("Refl",s) <- lex r ])
+  readsPrec d = readParen (d > 10) (\r -> [(Refl, s) | ("Refl",s) <- lex r ])
 
 instance Category (:=:) where
   id          = Refl

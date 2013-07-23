@@ -1,13 +1,15 @@
-{-# LANGUAGE PolyKinds, DeriveDataTypeable, NoImplicitPrelude #-}
+{-# LANGUAGE PolyKinds, DeriveDataTypeable, NoImplicitPrelude,
+             DeriveGeneric #-}
 
 module Data.Proxy
   (
-        Proxy(..)
+        Proxy(..), KProxy(..)
   ) where
 
 import Data.Data
 import Data.Monoid
 import Data.Traversable
+import Data.Foldable
 
 import Control.Applicative
 
@@ -16,10 +18,11 @@ import GHC.Show
 import GHC.Read
 import GHC.Enum
 import GHC.Arr
+import qualified GHC.Generics as Generics
 
 -- | A concrete, poly-kinded proxy type
 data Proxy t = Proxy
-  deriving (Typeable, Generic, Generic1)
+  deriving (Typeable, Generics.Generic)
 
 -- | A concrete, promotable proxy type, for use at the kind level
 -- There are no instances for this because it is intended at the kind level only
