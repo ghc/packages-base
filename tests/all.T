@@ -156,7 +156,7 @@ test('topHandler03',
 
 
 test('T8766',
-        [ stats_num_field('bytes allocated', (16828144, 5)),
+        [ stats_num_field('bytes allocated', (58771216, 5)),
 	# with GHC-7.6.3: 83937384 (but faster execution than the next line)
 	# before:         58771216 (without call-arity-analysis)
 	# expected value: 16828144 (2014-01-14)
