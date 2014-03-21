@@ -1,6 +1,6 @@
 # Changelog for [`base` package](http://hackage.haskell.org/package/base)
 
-## 4.7.0.0  *Feb 2014*
+## 4.7.0.0  *Mar 2014*
 
   * Bundled with GHC 7.8.1
 
