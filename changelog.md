@@ -1,5 +1,16 @@
 # Changelog for [`base` package](http://hackage.haskell.org/package/base)
 
+## 4.7.0.1  *Jun 2014*
+
+  * Bundled with GHC 7.8.3
+
+  * Unhide `Foreign.ForeignPtr` in Haddock (#8475)
+
+  * Fix recomputation of `TypeRep` in `Typeable` type-application instance
+    (#9203)
+
+  * Fix regression in Data.Fixed Read instance (#9231)
+
 ## 4.7.0.0  *Mar 2014*
 
   * Bundled with GHC 7.8.1
