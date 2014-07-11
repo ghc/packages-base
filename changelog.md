@@ -1,6 +1,6 @@
 # Changelog for [`base` package](http://hackage.haskell.org/package/base)
 
-## 4.7.0.1  *Jun 2014*
+## 4.7.0.1  *Jul 2014*
 
   * Bundled with GHC 7.8.3
 
@@ -10,6 +10,8 @@
     (#9203)
 
   * Fix regression in Data.Fixed Read instance (#9231)
+
+  * Fix `fdReady` to honor `FD_SETSIZE` (#9168)
 
 ## 4.7.0.0  *Mar 2014*
 
