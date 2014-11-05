@@ -1,5 +1,5 @@
 {-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE CPP, NoImplicitPrelude, MagicHash #-}
+{-# LANGUAGE CPP, NoImplicitPrelude, MagicHash, BangPatterns #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -754,9 +754,22 @@ groupBy eq (x:xs)       =  (x:ys) : groupBy eq zs
 inits                   :: [a] -> [[a]]
 inits                   = map toListSB . scanl' snocSB emptySB
 {-# NOINLINE inits #-}
+
 -- We do not allow inits to inline, because it plays havoc with Call Arity
 -- if it fuses with a consumer, and it would generally lead to serious
 -- loss of sharing if allowed to fuse with a producer.
+
+-- | A strictly accumulating version of 'scanl'
+{-# NOINLINE [1] scanl' #-}
+scanl'           :: (b -> a -> b) -> b -> [a] -> [b]
+-- This peculiar form is needed to prevent scanl' from being rewritten
+-- in its own right hand side.
+scanl' = scanlGo'
+  where
+    scanlGo' :: (b -> a -> b) -> b -> [a] -> [b]
+    scanlGo' f !q ls    = q : (case ls of
+                            []   -> []
+                            x:xs -> scanlGo' f (f q x) xs)
 
 -- | The 'tails' function returns all final segments of the argument,
 -- longest first.  For example,
