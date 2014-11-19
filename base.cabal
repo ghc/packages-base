@@ -1,5 +1,5 @@
 name:           base
-version:        4.7.0.1
+version:        4.7.0.2
 -- GHC 7.6.3 released with 4.7.0.0
 license:        BSD3
 license-file:   LICENSE
