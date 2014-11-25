@@ -1,5 +1,13 @@
 # Changelog for [`base` package](http://hackage.haskell.org/package/base)
 
+## 4.7.0.2  *Dec 2014*
+
+  * Bundled with GHC 7.8.4
+
+  * Fix performance bug in `Data.List.inits` (#9345)
+
+  * Fix handling of null bytes in `Debug.Trace.trace` (#9395)
+
 ## 4.7.0.1  *Jul 2014*
 
   * Bundled with GHC 7.8.3
